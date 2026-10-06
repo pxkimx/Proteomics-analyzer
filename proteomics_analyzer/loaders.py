@@ -125,7 +125,9 @@ def load(raw: bytes, filename: str, intensity_kind: str | None = None) -> Datase
         if DIANN_PRECURSOR_MARKERS & {c.lower() for c in df.columns}:
             raise ValueError(
                 "This looks like DIA-NN's precursor matrix (pr_matrix: one row per peptide ion). This program "
-                "works on protein-level tables: load the protein group matrix (report.pg_matrix.tsv) instead.")
+                "works on protein-level tables here: load the protein group matrix (report.pg_matrix.tsv) instead. "
+                "To look at peptides, for example which version of a protein was seen against two databases, "
+                "use the “Database check” mode (switch at the top of the page).")
         sample_cols = [c for c in df.columns if c.lower() not in DIANN_META
                        and _num(df[c]).notna().mean() > 0.2]
         notes.append(f"DIA-NN protein group matrix ({len(sample_cols)} runs).")
