@@ -192,3 +192,12 @@ def test_pdf_standard_search_section_both_ways(sim):
     assert "Figure 4" in with_b and "found by both searches" in with_b and "Not included in this report" not in with_b
     without = text(report.build_pdf(run(sim, with_b=False), {"report": "a", "fasta_ref": "b"}))
     assert "Not included in this report" in without and "Figure 4" not in without
+
+
+def test_pdf_banner_note(sim):
+    pytest.importorskip("reportlab")
+    pymupdf = pytest.importorskip("pymupdf")
+    from recode_detector import report
+    pdf = report.build_pdf(run(sim), {"report": "r"}, note="SIMULATED EXAMPLE banner")
+    text = " ".join(pg.get_text() for pg in pymupdf.open(stream=pdf, filetype="pdf"))
+    assert "SIMULATED EXAMPLE banner" in text

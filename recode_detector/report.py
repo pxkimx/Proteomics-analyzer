@@ -51,8 +51,8 @@ def _verdict_sentence(c: dict, ra: str, aa: str) -> str:
             f"version alone at {ref}, and both at {both}. Each position needs to be looked at individually.")
 
 
-def build_pdf(res, files: dict, run_date: _dt.date | None = None) -> bytes:
-    """res: dbcompare.Result. files: {slot: filename}."""
+def build_pdf(res, files: dict, run_date: _dt.date | None = None, note: str | None = None) -> bytes:
+    """res: dbcompare.Result. files: {slot: filename}. note: optional banner under the title (for example data)."""
     _need_reportlab()
     from reportlab.graphics.charts.barcharts import VerticalBarChart
     from reportlab.graphics.shapes import Drawing, Line, Rect, String
@@ -140,7 +140,10 @@ def build_pdf(res, files: dict, run_date: _dt.date | None = None) -> bytes:
               P(f"Which version of each protein did this mass spectrometry run see? ({_esc(change_txt)})", ParagraphStyle(
                   "sub", parent=body, fontSize=12.5, leading=16, textColor=colors.HexColor(GREY))),
               P(f"Prepared {run_date.strftime('%d %B %Y')} with Recode Detector {__version__}. "
-                f"Run analysed: {_esc(', '.join(res.samples))}.", small), Spacer(1, 6)]
+                f"Run analysed: {_esc(', '.join(res.samples))}.", small)]
+    if note:
+        story += [P(f"<b>{_esc(note)}</b>", ParagraphStyle("note", parent=body, fontSize=9.6, textColor=colors.HexColor(AMBER)))]
+    story += [Spacer(1, 6)]
 
     # ------------------------------------------------------------------ short version
     n_judged = c["alternative"] + c["reference"] + c["both"]
