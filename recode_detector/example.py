@@ -6,6 +6,7 @@ differential proteins are chosen by the generator, which also returns them as gr
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -70,10 +71,10 @@ def simulate_db(seed: int = 11, n_proteins: int = 90):
                 p = seq[cuts[a]:cuts[b]]
                 if 7 <= len(p) <= 30:
                     out.append(p)
-        return out
+        return sorted(set(out))                         # sorted: the same seed must give the same data in every process
 
     def spanning(seq, q):
-        return [p for p in set(digest(seq)) if seq.find(p) <= q < seq.find(p) + len(p)]
+        return [p for p in digest(seq) if seq.find(p) <= q < seq.find(p) + len(p)]
 
     alts, truth = {}, {}
     statuses = ["alternative"] * 3 + ["reference", "both", "none", "none", "none"]
@@ -94,7 +95,7 @@ def simulate_db(seed: int = 11, n_proteins: int = 90):
         alt = alts.get(pid)
         site = [k for k in truth if k[0] == pid]
         q = site[0][1] - 1 if site else None
-        for p in set(digest(seq)):
+        for p in digest(seq):
             spans = q is not None and seq.find(p) <= q < seq.find(p) + len(p)
             if spans:
                 if truth[(pid, q + 1)] in ("reference", "both"):
@@ -124,3 +125,94 @@ def simulate_db(seed: int = 11, n_proteins: int = 90):
 
     return {"ref_fasta": fasta(refs), "alt_fasta": fasta({f"{k}_ALT": v for k, v in alts.items()}),
             "report": report(seen_a), "report_b": report(seen_b), "truth": truth}
+
+
+def simulate_spectra(e: dict, path: str, seed: int = 5, cycle_min: float = 0.05, run_min: float = 9.0) -> dict:
+    """Write a SIMULATED data-independent-acquisition mzML (gzip if the path ends in .gz) for the simulate_db() example.
+
+    The peptides that the example says are really present (alternative, reference, or both, per site) elute as Gaussian peaks
+    and fragment into b and y ions; everything else is noise. Returns the truth: {(protein, position): present versions}.
+    """
+    import base64
+    import gzip
+    import zlib
+
+    from . import dbcompare, msms
+
+    rng = np.random.default_rng(seed)
+    table = dbcompare.read_peptides(e["report"].encode())
+    res = dbcompare.analyse(dbcompare.pair_databases(dbcompare.parse_fasta(e["ref_fasta"]), dbcompare.parse_fasta(e["alt_fasta"])),
+                            table, dbcompare.read_peptides(e["report_b"].encode()))
+    present = []                                               # (modified sequence, charge, rt, truth key, version)
+    truth = {}
+    for i, s in enumerate(res.sites):
+        key = (s["ref_protein"], s["position"])
+        vers = {"alternative": ["alternative"], "reference": ["reference"], "both": ["alternative", "reference"]}.get(
+            e["truth"][key], [])
+        truth[key] = vers
+        pr = next(p for p in dbcompare.pair_databases(dbcompare.parse_fasta(e["ref_fasta"]),
+                                                      dbcompare.parse_fasta(e["alt_fasta"])).pairs if p.ref_id == key[0])
+        for v in vers:
+            lst = s["alt_peptides"] if v == "alternative" else s["ref_peptides"]
+            if lst:
+                seq0 = lst[0]["sequence"]
+                (_, z0), _ = max(table.peptides[seq0]["precursors"].items(), key=lambda kv: float(kv[1].sum()))
+                present.append((seq0, int(z0), float(rng.uniform(1.5, run_min - 1.5)), key, v))
+    # a few unrelated background peptides so the windows are not empty
+    n_cycles = int(run_min / cycle_min)
+    edges = np.arange(300, 1800, 100)
+    spectra = []
+    scan = 0
+    for c in range(n_cycles):
+        t = c * cycle_min
+        scan += 1
+        mz1, in1 = list(rng.uniform(300, 1700, 40)), list(rng.uniform(1e3, 5e3, 40))
+        for seq, z, rt, _, _ in present:
+            g = np.exp(-((t - rt) ** 2) / (2 * 0.04 ** 2))
+            sq, sh, nt = msms.parse_modified(seq)
+            m = msms.precursor_mz(sq, msms.with_fixed_cam(sq, sh, False), nt, z)
+            if g > 0.01:
+                for k, f in enumerate((1.0, 0.55, 0.2)):
+                    mz1.append(m + k * 1.00335 / z)
+                    in1.append(5e6 * g * f)
+        o = np.argsort(mz1)
+        spectra.append({"scan": scan, "level": 1, "rt": t, "mz": np.array(mz1)[o], "int": np.array(in1)[o]})
+        for w in edges:
+            scan += 1
+            mz2, in2 = list(rng.uniform(150, 1700, 120)), list(rng.uniform(5e2, 4e3, 120))
+            for seq, z, rt, _, _ in present:
+                sq, sh, nt = msms.parse_modified(seq)
+                sh = msms.with_fixed_cam(sq, sh, False)
+                m = msms.precursor_mz(sq, sh, nt, z)
+                if w - 1 <= m <= w + 99 and abs(t - rt) < 0.2:
+                    g = np.exp(-((t - rt) ** 2) / (2 * 0.04 ** 2))
+                    for f in msms.fragments(sq, sh, nt):
+                        if f.charge == 1 and rng.random() < 0.8:
+                            mz2.append(f.mz * (1 + rng.normal(0, 2e-6)))
+                            in2.append(2e5 * g * rng.uniform(0.2, 1.0))
+            o = np.argsort(mz2)
+            spectra.append({"scan": scan, "level": 2, "rt": t + 0.001, "mz": np.array(mz2)[o], "int": np.array(in2)[o],
+                            "target": w + 49.0, "lo": 50.0, "hi": 50.0})
+
+    def b64(a):
+        return base64.b64encode(zlib.compress(np.asarray(a, dtype="<f8").tobytes())).decode()
+    parts = ['<?xml version="1.0" encoding="utf-8"?>\n<mzML xmlns="http://psi.hupo.org/ms/mzml"><run><spectrumList count="%d">' % len(spectra)]
+    for i, s_ in enumerate(spectra):
+        cv = [f'<cvParam cvRef="MS" accession="MS:1000511" name="ms level" value="{s_["level"]}"/>',
+              f'<cvParam cvRef="MS" accession="MS:1000016" name="scan start time" value="{s_["rt"]:.5f}" unitName="minute"/>',
+              f'<cvParam cvRef="MS" accession="MS:1003057" name="scan number" value="{s_["scan"]}"/>']
+        if s_["level"] == 2:
+            cv += [f'<cvParam cvRef="MS" accession="MS:1000827" name="isolation window target m/z" value="{s_["target"]}"/>',
+                   f'<cvParam cvRef="MS" accession="MS:1000828" name="isolation window lower offset" value="{s_["lo"]}"/>',
+                   f'<cvParam cvRef="MS" accession="MS:1000829" name="isolation window upper offset" value="{s_["hi"]}"/>']
+        parts.append(f'<spectrum index="{i}" id="scan={s_["scan"]}" defaultArrayLength="{len(s_["mz"])}">' + "".join(cv)
+                     + '<binaryDataArrayList count="2">'
+                     + f'<binaryDataArray><cvParam accession="MS:1000523" name="64-bit float"/><cvParam accession="MS:1000574" name="zlib compression"/><cvParam accession="MS:1000514" name="m/z array"/><binary>{b64(s_["mz"])}</binary></binaryDataArray>'
+                     + f'<binaryDataArray><cvParam accession="MS:1000523" name="64-bit float"/><cvParam accession="MS:1000574" name="zlib compression"/><cvParam accession="MS:1000515" name="intensity array"/><binary>{b64(s_["int"])}</binary></binaryDataArray>'
+                     + "</binaryDataArrayList></spectrum>")
+    parts.append("</spectrumList></run></mzML>")
+    data = "".join(parts).encode()
+    if str(path).endswith(".gz"):
+        data = gzip.compress(data, 5)
+    Path(path).write_bytes(data)
+    return truth

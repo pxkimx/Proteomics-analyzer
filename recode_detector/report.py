@@ -51,7 +51,32 @@ def _verdict_sentence(c: dict, ra: str, aa: str) -> str:
             f"version alone at {ref}, and both at {both}. Each position needs to be looked at individually.")
 
 
-def build_pdf(res, files: dict, run_date: _dt.date | None = None, note: str | None = None) -> bytes:
+def spectra_summary(spectra: dict | None, sites: list[dict]) -> dict | None:
+    """How the raw-spectrum check relates to what the search software reported."""
+    if not spectra or not spectra.get("results"):
+        return None
+    obs = {(i, v): {p["sequence"] for p in s[k] if not p["also_elsewhere"]}
+           for i, s in enumerate(sites) for v, k in (("alternative", "alt_peptides"), ("reference", "ref_peptides"))}
+    out = {"alt_obs": 0, "alt_supported": 0, "alt_weak": 0, "alt_not": 0, "ref_ctr_supported": 0, "ref_ctr_weak": 0, "n": len(spectra["results"])}
+    for x in spectra["results"]:
+        site, ver, seq = x.get("site"), x.get("version"), x.get("peptide")
+        if site is None:
+            continue
+        observed = seq in obs.get((site, ver), set())
+        if observed and ver == "alternative":
+            out["alt_obs"] += 1
+            out["alt_supported" if x["verdict"] == "supported" else "alt_weak" if x["verdict"] == "weak" else "alt_not"] += 1
+        elif not observed and ver == "reference" and not obs.get((site, "reference")):
+            if x["verdict"] == "supported":
+                out["ref_ctr_supported"] += 1
+            elif x["verdict"] == "weak":
+                out["ref_ctr_weak"] += 1
+    out["conflict"] = out["alt_not"] > 0 or out["ref_ctr_supported"] > 0
+    return out
+
+
+def build_pdf(res, files: dict, run_date: _dt.date | None = None, note: str | None = None,
+              qc: dict | None = None, spectra: dict | None = None) -> bytes:
     """res: dbcompare.Result. files: {slot: filename}. note: optional banner under the title (for example data)."""
     _need_reportlab()
     from reportlab.graphics.charts.barcharts import VerticalBarChart
@@ -147,6 +172,7 @@ def build_pdf(res, files: dict, run_date: _dt.date | None = None, note: str | No
 
     # ------------------------------------------------------------------ short version
     n_judged = c["alternative"] + c["reference"] + c["both"]
+    ss_ = spectra_summary(spectra, sites)
     short = bullets([
         f"The run identified <b>{_n(cov['n_peptides'])}</b> different peptides (short pieces of protein) and found at least one "
         f"for <b>{_n(cov['n_detected'])} of the {_n(cov['n_proteins'])}</b> proteins in the reference database "
@@ -157,9 +183,16 @@ def build_pdf(res, files: dict, run_date: _dt.date | None = None, note: str | No
         f"({_esc(change_txt)}).",
         f"The run could judge <b>{n_judged} of {summ['n_sites']}</b> of those positions: <b>{c['alternative']}</b> showed only the "
         f"alternative version, <b>{c['reference']}</b> only the standard version, <b>{c['both']}</b> both. "
-        f"The other <b>{c['none']}</b> were not covered by any identified peptide, so the run says nothing about them."])
+        f"The other <b>{c['none']}</b> were not covered by any identified peptide, so the run says nothing about them."]
+        + ([f"<b>Raw-spectrum check:</b> of the {ss_['alt_obs']} alternative-version peptides the search software identified, the actual "
+            f"fragmentation spectra confirm <b>{ss_['alt_supported']}</b> and partly support {ss_['alt_weak']}; {ss_['alt_not']} could not be "
+            f"confirmed. At <b>{ss_['ref_ctr_supported']}</b> positions the spectra instead show convincing evidence for the "
+            f"<i>reference</i> version (the original letter), which the search did not report."] if ss_ else []))
     box = Table([[ [P("The short version", h2)] + short + [Spacer(1, 4),
-                    P("<b>Bottom line.</b> " + _verdict_sentence(c, ra, aa), body)] ]], colWidths=[6.9 * inch])
+                    P("<b>Bottom line.</b> " + _verdict_sentence(c, ra, aa)
+                      + (" <b>However, the raw spectra do not fully agree with the search results (see \"Looking at the raw spectra\"), so "
+                         "treat the conclusion as open until the key peptides have been checked in a spectrum viewer.</b>"
+                         if ss_ and ss_["conflict"] else ""), body)] ]], colWidths=[6.9 * inch])
     box.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(LIGHT)),
                              ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor(TEAL)),
                              ("LEFTPADDING", (0, 0), (-1, -1), 12), ("RIGHTPADDING", (0, 0), (-1, -1), 12),
@@ -212,6 +245,18 @@ def build_pdf(res, files: dict, run_date: _dt.date | None = None, note: str | No
               P("A side effect worth knowing: trypsin cuts after R but not after W. If a position really is W, the peptide that "
                 "would have ended there is instead joined to the next piece, so the alternative peptide is usually longer than the "
                 "standard one. That is one reason a position can go uncovered.")]
+    unc = [s_ for s_ in sites if s_["status"] == "none"]
+    if unc:
+        both_ok = sum(1 for s_ in unc if s_["expected_ref"]["detectable"] and s_["expected_alt"]["detectable"])
+        ref_only = sum(1 for s_ in unc if s_["expected_ref"]["detectable"] and not s_["expected_alt"]["detectable"])
+        alt_only = sum(1 for s_ in unc if s_["expected_alt"]["detectable"] and not s_["expected_ref"]["detectable"])
+        neither = len(unc) - both_ok - ref_only - alt_only
+        story += [P(f"<b>Why were {len(unc)} positions not covered?</b> For each one the program works out which peptides the enzyme "
+                    f"would produce and whether a search could see them (between 7 and 30 amino acids). At <b>{both_ok}</b> of the uncovered "
+                    f"positions <i>both</i> versions would have made a detectable peptide, so the run simply did not identify one. "
+                    f"At <b>{ref_only}</b> only the standard version would be detectable (the alternative peptide would be too long or too short), "
+                    f"at <b>{alt_only}</b> only the alternative version, and at <b>{neither}</b> neither. Where a version could never be "
+                    f"detected, its absence is not evidence about the biology.")]
     bars = chart([c["alternative"], c["reference"], c["both"], c["none"]],
                  ["Alternative", "Standard", "Both", "No peptide"], w=300, ylab="Number of positions",
                  bar_colors=[AMBER, TEAL, "#c98a1b", "#a39b8a"])
@@ -291,6 +336,24 @@ def build_pdf(res, files: dict, run_date: _dt.date | None = None, note: str | No
                     "To add it: run the same files through DIA-NN with the standard FASTA only, then load the new "
                     "<font face='Courier'>report.pr_matrix.tsv</font> in the program's fourth file box and download this report again.")]
 
+    # ------------------------------------------------------------------ quality checks
+    if qc and qc.get("checks"):
+        story += [P("Quality checks on the run", h2),
+                  P("These checks ask whether the run itself looks healthy, using rules of thumb that are shown next to each result. "
+                    "A warning is a reason to look closer, not proof of a problem.")]
+        word = {"pass": "Pass", "warn": "Check", "fail": "Problem", "info": "Info"}
+        col = {"pass": "#2f7d6d", "warn": "#c98a1b", "fail": "#d9452b", "info": "#6d6657"}
+        rows = [[P("Check", cellb), P("Result", cellb), P("Verdict", cellb), P("What it means", cellb)]]
+        for c_ in qc["checks"]:
+            rows.append([P(_esc(c_["name"]), cell), P(_esc(c_["value"]), cell),
+                         P(f"<font color='{col[c_['status']]}'><b>{word[c_['status']]}</b></font> ({_esc(c_['rule'])})", cell),
+                         P(_esc(c_["why"]), cell)])
+        story += [table(rows, [1.9 * inch, 1.1 * inch, 1.5 * inch, 2.4 * inch])]
+
+    # ------------------------------------------------------------------ spectrum evidence
+    if spectra and spectra.get("results"):
+        story += _spectra_section(spectra, sites, P, h2, cell, cellb, small, table, captioned, colors, inch, Drawing, Line, String, Rect, KeepTogether)
+
     # ------------------------------------------------------------------ caveats
     story += [P("What this does and does not show", h2)] + bullets([
         "<b>It is a lead, not proof.</b> Every identification carries a small chance of being wrong, and a position supported by "
@@ -331,7 +394,12 @@ def build_pdf(res, files: dict, run_date: _dt.date | None = None, note: str | No
              ("Trypsin", "The usual enzyme; it cuts after K (lysine) and R (arginine), except before P (proline)."),
              ("Missed cleavage", "A cut site inside a peptide that the enzyme did not cut."),
              ("Intensity", "The measured signal strength. Useful for comparing peptides, not an absolute amount."),
-             ("DIA-NN", "The software that identified and quantified the peptides from the raw data.")]
+             ("DIA-NN", "The software that identified and quantified the peptides from the raw data."),
+             ("Fragment ion (b and y)", "When a peptide is broken in the instrument it splits into pieces. b ions hold the start of the "
+                                        "sequence and y ions the end; their masses spell out the sequence."),
+             ("MS/MS spectrum", "The list of fragment masses and strengths measured for one isolated peptide."),
+             ("Retention time", "When a peptide comes off the chromatography column, in minutes after the run started."),
+             ("Chance probability", "How likely it is that the observed number of fragment matches happened by accident. Smaller is more convincing.")]
     story += [table([[P(f"<b>{a}</b>", cell), P(b, cell)] for a, b in gloss], [1.5 * inch, 5.4 * inch], header=False)]
 
     story += [P("Appendix C. Methods and files", h1)]
@@ -384,3 +452,59 @@ def _median_len(cov: dict) -> str:
         if run >= total / 2:
             return str(k)
     return "-"
+
+
+def _spectra_section(spectra, sites, P, h2, cell, cellb, small, table, captioned, colors, inch, Drawing, Line, String, Rect, KeepTogether):
+    res = spectra["results"]
+    src = spectra.get("source", {})
+    out = [P("Looking at the raw spectra", h2),
+           P(f"The identifications above come from the search software. As an independent check, the program went back to the raw data "
+             f"({_esc(src.get('name', 'the raw file'))}{', ' + _esc(src.get('instrument', '')) if src.get('instrument') else ''}) "
+             f"and looked at the actual fragmentation spectra for the key peptides. For each peptide it finds the intact ion in the "
+             f"survey scans, takes the fragmentation scans taken at the moment it elutes, and asks how many of the expected fragment "
+             f"ions are really there. It then does the same for the <i>counterpart</i> peptide carrying the other letter at the changed "
+             f"position. Fragments that contain the changed letter are the ones that tell the versions apart, so they carry the verdict. "
+             f"The chance column is the probability that this many fragments would match by accident, corrected for picking the best of "
+             f"many scans; smaller means more convincing. As a negative control, 20 shuffled decoy peptides of the same mass are scored on the "
+             f"same scans; the Decoys column shows how many matched as well (it should be 0).")]
+    word = {"supported": "Supported", "weak": "Weak", "not seen": "Not seen", "no MS1 signal": "No signal", "no MS/MS": "No MS/MS", "error": "Error"}
+    rows = [[P("Protein", cellb), P("Pos", cellb), P("Version", cellb), P("Peptide", cellb), P("Elutes", cellb),
+             P("Ions (changed)", cellb), P("Chance", cellb), P("Decoys", cellb), P("Verdict", cellb)]]
+    for r in res:
+        site = sites[r["site"]] if r.get("site") is not None and r["site"] < len(sites) else None
+        m1, m2 = r.get("ms1") or {}, r.get("ms2") or {}
+        bm = m2.get("best") or {}
+        rows.append([P(_esc(_short(site["ref_protein"])) if site else "", cell), P(str(site["position"]) if site else "", cell),
+                     P(_esc(r.get("version", "")), cell), P(_esc(r.get("modified", "")), cell),
+                     P(f"{m1['apex_rt']:.2f}" if m1.get("apex_rt") else "-", cell),
+                     P(f"{bm.get('n_matched', '-')} ({bm.get('n_disc', '-')})", cell),
+                     P(("<1e-12" if bm["p_chance"] <= 1e-12 else f"{bm['p_chance']:.0e}") if bm.get("p_chance") is not None else "-", cell),
+                     P(f"{bm['decoys']['as_good']}/{bm['decoys']['n']}" if bm.get("decoys") else "-", cell),
+                     P(word.get(r.get("verdict"), r.get("verdict", "")), cell)])
+    out += [table(rows, [0.95 * inch, 0.4 * inch, 0.85 * inch, 1.35 * inch, 0.55 * inch, 0.7 * inch, 0.6 * inch, 0.65 * inch, 0.75 * inch])]
+    out += [P("Verdicts are heuristic: Supported needs at least two fragment ions that contain the changed letter, with a chance of "
+              "1 in 1,000 or better, plus a good overall match and at most one decoy matching as well. Co-elution of the fragments (they should rise and fall together) is "
+              "reported in the spreadsheet export. Because this is a data-dependent read of one run, treat it as a lead and confirm in "
+              "the search software or a dedicated viewer.", small)]
+    # mini annotated spectra for the strongest supported peptides
+    good = [r for r in res if r.get("verdict") == "supported" and (r.get("ms2") or {}).get("best")]
+    good.sort(key=lambda r: r["ms2"]["best"]["p_chance"])
+    for r in good[:3]:
+        bm = r["ms2"]["best"]
+        w, h = 470, 150
+        d = Drawing(w, h + 24)
+        mz, it = bm["mz"], bm["int"]
+        lo, hi = min(mz) - 5, max(mz) + 5
+        mx = max(it) or 1
+        d.add(Rect(30, 18, w - 40, h - 8, strokeColor=colors.HexColor("#cbd5e1"), fillColor=None, strokeWidth=.5))
+        matched = {x["index"]: x for x in bm["matches"]}
+        for i, (a, b) in enumerate(zip(mz, it)):
+            x = 30 + (a - lo) / (hi - lo) * (w - 40)
+            y = 18 + b / mx * (h - 30)
+            hit = i in matched
+            d.add(Line(x, 18, x, y, strokeColor=colors.HexColor("#b8b2a3" if not hit else (AMBER if matched[i]["disc"] else BLUE)), strokeWidth=1.3 if hit else .6))
+            if hit:
+                d.add(String(x - 6, y + 2, matched[i]["label"], fontSize=6.5, fontName="Helvetica", fillColor=colors.HexColor(GREY)))
+        d.add(String(30, h + 12, f"{_esc(r['modified'])}  ({r['version']}), charge {r['charge']}+, scan {bm['scan']}, {r['ms1']['apex_rt']:.2f} min", fontSize=8, fontName="Helvetica-Bold"))
+        out += [KeepTogether(captioned(d, "Matched fragment ions are labelled. Red = contains the changed residue; green = other matched ions; grey = unmatched."))]
+    return out

@@ -1,6 +1,6 @@
 /* Database check mode: which version of a protein did the search see? */
 const DB_SLOTS = [
-  { slot: 'report', title: 'Peptide report from your search', need: true, hint: 'DIA-NN precursor matrix, report.pr_matrix.tsv', accept: '.tsv,.txt,.csv' },
+  { slot: 'report', title: 'Peptide report from your search', need: true, hint: 'DIA-NN precursor matrix (report.pr_matrix.tsv) or the long report (report.tsv, which adds retention times and q-values)', accept: '.tsv,.txt,.csv' },
   { slot: 'fasta_ref', title: 'Protein database (FASTA)', need: true, hint: 'The standard proteins, or one file holding standard and variant proteins', accept: '.fasta,.fa,.faa,.txt' },
   { slot: 'fasta_alt', title: 'Alternative-coding FASTA', need: false, hint: 'Optional. Only the variants, or the whole alternative proteome', accept: '.fasta,.fa,.faa,.txt' },
   { slot: 'report_b', title: 'Report from a standard-database search', need: false, hint: 'Optional. The same data searched without the alternative proteins', accept: '.tsv,.txt,.csv' },
@@ -59,6 +59,8 @@ function renderDb() {
     ro('both seen', c.both) + ro('no coverage', c.none) + ro('peptides in report', s.n_peptides.toLocaleString()) +
     (s.n_unpaired ? ro('unpaired variants', s.n_unpaired) : '');
   fillSites(); drawDbScatter(); drawDbCover();
+  if (window.drawDbQc) drawDbQc();
+  if (window.renderSpectra) renderSpectra();
 }
 function peptideLine(p, version, samples) {
   const mx = Math.max(...p.intensity, 1);
@@ -92,6 +94,8 @@ $('#t-db tbody').addEventListener('click', e => {
   const blk = (title, list, v) => `<div class="kicker" style="margin:8px 0 4px">${title}</div>` + (list.length ? list.map(p => peptideLine(p, v, samples)).join('') : '<div class="small">none identified</div>');
   d.innerHTML = `<td colspan="7"><div class="small">${esc(s.description)}</div>
     ${blk(`Reference peptides spanning ${s.ref_aa}${s.position}`, s.ref_peptides, 'ref')}${blk(`Alternative peptides spanning ${s.alt_aa}${s.position}`, s.alt_peptides, 'alt')}
+    <div class="kicker" style="margin:10px 0 4px">Could each version be detected?</div><div class="small" style="margin:0">Reference: ${esc(s.expected_ref.note)}.<br>Alternative: ${esc(s.expected_alt.note)}.</div>
+    <div class="actions" style="margin-top:10px"><button class="ghost sm" data-check-site="${DBS.result.sites.indexOf(s)}">Check the spectra for this site</button></div>
     ${s.ref_peptides_b.length ? `<div class="kicker" style="margin:8px 0 4px">Reference peptides in the standard-database search</div>` + s.ref_peptides_b.map(p => `<div class="pep"><span>${esc(p.sequence)}</span><em>${p.start}–${p.end}</em><em></em><span><em>${fmtI(p.total_intensity)}${p.seen_in_a ? ' · also in main search' : ' · not in main search'}</em></span></div>`).join('') : ''}
     </td>`;
   tr.after(d);

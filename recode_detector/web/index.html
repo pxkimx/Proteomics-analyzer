@@ -21,6 +21,7 @@
     <button data-mode="quant" class="on">Quantification</button><button data-mode="db">Database check</button>
   </div>
   <nav id="nav" aria-label="Workflow">
+    <button data-mode="both" data-page="runs"><i>&#9719;</i>Runs</button>
     <button data-mode="quant" data-page="data" class="on"><i>01</i>Data</button>
     <button data-mode="quant" data-page="groups"><i>02</i>Groups</button>
     <button data-mode="quant" data-page="process"><i>03</i>Process</button>
@@ -30,9 +31,11 @@
     <button data-mode="quant" data-page="export"><i>07</i>Export</button>
     <button data-mode="db" data-page="dbfiles" hidden><i>01</i>Files</button>
     <button data-mode="db" data-page="dbsites" hidden><i>02</i>Sites</button>
-    <button data-mode="db" data-page="dbcover" hidden><i>03</i>Coverage</button>
-    <button data-mode="db" data-page="dbscatter" hidden><i>04</i>Standard search</button>
-    <button data-mode="db" data-page="dbexport" hidden><i>05</i>Report</button>
+    <button data-mode="db" data-page="dbspectra" hidden><i>03</i>Spectra</button>
+    <button data-mode="db" data-page="dbcover" hidden><i>04</i>Coverage</button>
+    <button data-mode="db" data-page="dbqc" hidden><i>05</i>QC</button>
+    <button data-mode="db" data-page="dbscatter" hidden><i>06</i>Standard search</button>
+    <button data-mode="db" data-page="dbexport" hidden><i>07</i>Report</button>
   </nav>
   <div class="tools">
     <select id="look" title="Look" aria-label="Look"></select>
@@ -43,6 +46,14 @@
 
 <main>
   <div id="toast" role="status"></div>
+
+  <!-- RUNS -->
+  <section id="p-runs" class="page">
+    <div class="lead"><div class="kicker">Saved runs</div><h2>Your previous analyses</h2>
+      <p>Every analysis you run is saved automatically with its input files and settings. Open one to pick up where you left off: results are recomputed from the saved inputs, so nothing is out of date. Simulated examples are not saved.</p></div>
+    <div class="card"><div class="bar"><div class="kicker">History</div><span class="xp" data-export="runs"></span><span class="small" id="runs-root"></span></div>
+      <div id="runs-list"></div></div>
+  </section>
 
   <!-- 01 DATA -->
   <section id="p-data" class="page on">
@@ -118,6 +129,7 @@
   <section id="p-qc" class="page">
     <div class="lead"><div class="kicker">Step 4</div><h2>Quality control</h2>
       <p>Check these before trusting any comparison: similar depth across runs, aligned medians after normalisation, replicates that cluster together.</p></div>
+    <div class="card"><div class="bar"><div class="kicker">Checks</div><span class="xp" data-export="qc_checks"></span><span id="q-sum" class="small"></span></div><div id="q-checks" class="checks"></div></div>
     <div class="readouts" id="qc-read"></div>
     <div class="grid2">
       <figure class="card"><figcaption>Proteins per sample</figcaption><canvas id="c-ident" height="260"></canvas></figure>
@@ -127,6 +139,8 @@
       <figure class="card"><figcaption>Coefficient of variation within groups</figcaption><canvas id="c-cv" height="260"></canvas></figure>
       <figure class="card"><figcaption>Dynamic range (mean log2 intensity by rank)</figcaption><canvas id="c-rank" height="260"></canvas></figure>
     </div>
+    <div class="card"><div class="bar"><div class="kicker">Per-sample QC</div><span class="xp" data-export="sample_qc"></span></div>
+      <div class="tscroll"><table class="tbl" id="t-sq"><thead><tr><th>Sample</th><th>Group</th><th>Proteins</th><th>Missing %</th><th>Median log2</th><th>Corr. to group</th><th>Flag</th></tr></thead><tbody></tbody></table></div></div>
     <div class="actions"><button class="btn" data-go="diff">Next: differential analysis →</button></div>
   </section>
 
@@ -150,7 +164,7 @@
       </div>
       <figure class="card"><figcaption>Significant proteins, z-scored <button class="ghost sm" data-save="c-heat">PNG</button></figcaption><canvas id="c-heat" height="420"></canvas></figure>
       <div class="card">
-        <div class="bar"><div class="kicker">Results table</div>
+        <div class="bar"><div class="kicker">Results table</div><span class="xp" data-export="results"></span>
           <select id="t-filter"><option value="sig">Significant</option><option value="up">Up</option><option value="down">Down</option><option value="all">All tested</option></select>
           <input id="t-search" type="search" placeholder="search gene or ID…"></div>
         <div class="tscroll"><table class="tbl" id="t-res"><thead><tr>
@@ -169,18 +183,15 @@
       <label>Proteins to test <select id="en-dir"><option value="both">Up and down</option><option value="up">Up only</option><option value="down">Down only</option></select></label>
       <button class="btn" id="en-run">Run enrichment</button>
     </div>
-    <div id="en-out" class="card hidden"><div class="small" id="en-info"></div>
+    <div id="en-out" class="card hidden"><div class="bar"><span class="xp" data-export="enrichment"></span><div class="small" id="en-info"></div></div>
       <div class="tscroll"><table class="tbl" id="t-en"><thead><tr><th>Gene set</th><th>Size</th><th>Hits</th><th>Fold</th><th>p</th><th>FDR</th><th>Genes</th></tr></thead><tbody></tbody></table></div></div>
   </section>
 
   <!-- 07 EXPORT -->
   <section id="p-export" class="page">
-    <div class="lead"><div class="kicker">Step 7</div><h2>Export</h2></div>
-    <div class="grid3">
-      <a class="card dl" id="x-res" href="/api/download/results" download><div class="kicker">CSV</div><h3>Differential results</h3><p>Every tested protein: fold change, p, FDR, call.</p></a>
-      <a class="card dl" id="x-proc" href="/api/download/processed" download><div class="kicker">CSV</div><h3>Processed matrix</h3><p>Normalised, imputed log2 intensities.</p></a>
-      <a class="card dl" id="x-set" href="/api/download/settings" download><div class="kicker">JSON</div><h3>Analysis settings</h3><p>Groups, parameters and each processing step, for the methods section.</p></a>
-    </div>
+    <div class="lead"><div class="kicker">Step 7</div><h2>Export</h2><p>Every table can be downloaded on its own, in the format you choose. The ZIP holds all of them.</p></div>
+    <div class="card bar"><label>Format <select id="fmt-q"><option value="csv">CSV</option><option value="tsv">TSV (tab-separated)</option><option value="xlsx">Excel (.xlsx)</option></select></label></div>
+    <div class="grid3" id="x-grid"></div>
   </section>
 
   <!-- DB 01 FILES -->
@@ -203,7 +214,7 @@
       <p>A peptide counts only if it spans the position and does not also occur elsewhere in the database. Peptides that do are shown as ambiguous and are not counted.</p></div>
     <div class="readouts" id="db-read"></div>
     <div class="card">
-      <div class="bar"><div class="kicker">Sites</div>
+      <div class="bar"><div class="kicker">Sites</div><span class="xp" data-export="db_sites"></span>
         <select id="db-filter"><option value="all">All sites</option><option value="alternative">Alternative version seen</option><option value="reference">Reference version seen</option><option value="both">Both seen</option><option value="none">No covering peptide</option></select>
         <input id="db-search" type="search" placeholder="search protein…"></div>
       <div class="tscroll"><table class="tbl" id="t-db"><thead><tr><th>Protein</th><th>Position</th><th>Change</th><th>Verdict</th><th>Reference peptides</th><th>Alternative peptides</th><th>Context</th></tr></thead><tbody></tbody></table></div>
@@ -213,9 +224,43 @@
       <p class="small">“Alternative version seen” means a peptide containing the alternative residue was identified and the reference version was not. It is only as reliable as the search's own false-discovery control, and a single peptide is thin evidence: check the spectra of the peptides that matter. Missing coverage is not evidence against a version, because many positions fall inside peptides that were never identified.</p></div>
   </section>
 
+  <!-- DB SPECTRA -->
+  <section id="p-dbspectra" class="page">
+    <div class="lead"><div class="kicker">Database check · step 3</div><h2>Check the raw spectra</h2>
+      <p>The search software says which peptides it identified. Here the program goes back to the raw data and looks at the actual fragmentation spectra: it finds each peptide's intact mass in the survey scans, takes the fragmentation scans from the moment it elutes, and counts how many of the expected fragment ions are really there. The same is done for the counterpart peptide with the other letter at the changed position. Thermo <code>.raw</code> files are read in place (nothing is converted), and mzML works for small files.</p></div>
+    <div class="card form">
+      <label>Raw data file
+        <span class="row"><input id="sp-path" placeholder="Choose a .raw or .mzML file, or paste its path" style="flex:1;width:100%"><button class="btn ghost" id="sp-pick" type="button">Choose…</button></span></label>
+      <div id="sp-note" class="small"></div>
+      <div class="row sub"><label>Fragment tolerance (ppm)<input type="number" id="sp-ppm" value="10" min="1" max="50" step="1"></label>
+        <label>Time window (± min)<input type="number" id="sp-win" value="0.15" min="0.03" max="1" step="0.01"></label></div>
+      <div class="actions"><button class="btn" id="sp-run">Check all sites with evidence</button><button class="ghost" id="sp-cancel" hidden>Stop</button></div>
+      <div id="sp-prog" class="prog hidden"><div class="progbar"><i></i></div><span></span></div>
+    </div>
+    <div class="card form"><h3>Check any peptide</h3>
+      <div class="row" style="flex-wrap:wrap"><input id="sp-seq" placeholder="peptide, e.g. AWEGSLR or AAC(UniMod:4)DEK" style="flex:1;min-width:260px;width:auto"><label style="margin:0">charge <input type="number" id="sp-z" value="2" min="1" max="6" style="width:64px"></label><button class="btn" id="sp-one">Check</button></div></div>
+    <div id="sp-out" class="hidden">
+      <div class="readouts" id="sp-read"></div>
+      <div class="card"><div class="bar"><div class="kicker">Checked peptides</div><span class="xp" data-export="db_spectra"></span><span class="xp" data-export="db_spectra_ions"></span><span class="small">Click a row to see its spectra. The matching counterpart is shown beside it.</span></div>
+        <div class="tscroll"><table class="tbl" id="t-sp"><thead><tr><th>Protein</th><th>Pos.</th><th>Version</th><th>Peptide</th><th>z</th><th>Elutes (min)</th><th>Fragments</th><th>Chance</th><th>Verdict</th></tr></thead><tbody></tbody></table></div></div>
+      <div id="sp-detail" class="grid2"></div>
+      <div class="card" id="sp-custom-card" hidden><div class="kicker">Peptides you checked by hand</div><div id="sp-custom-detail" class="grid2" style="margin-top:12px"></div></div>
+    </div>
+  </section>
+
+  <!-- DB QC -->
+  <section id="p-dbqc" class="page">
+    <div class="lead"><div class="kicker">Database check · step 5</div><h2>Is the run itself healthy?</h2>
+      <p>Checks on the peptide report: digestion, charge states, peptide lengths, how many proteins rest on a single peptide, and how repeatable runs are. The rule for each check is shown so you can judge it yourself.</p></div>
+    <div class="readouts" id="dq-read"></div>
+    <div class="card"><div class="bar"><div class="kicker">Checks</div><span class="xp" data-export="db_qc_checks"></span></div><div id="dq-checks" class="checks"></div></div>
+    <div class="card"><div class="bar"><div class="kicker">Per run</div><span class="xp" data-export="db_qc_runs"></span></div>
+      <div class="tscroll"><table class="tbl" id="t-dqr"><thead><tr><th>Run</th><th>Precursors</th><th>Peptides</th><th>Total signal</th></tr></thead><tbody></tbody></table></div></div>
+  </section>
+
   <!-- DB COVERAGE -->
   <section id="p-dbcover" class="page">
-    <div class="lead"><div class="kicker">Database check · step 3</div><h2>How much of the proteome was seen?</h2>
+    <div class="lead"><div class="kicker">Database check · step 4</div><h2>How much of the proteome was seen?</h2>
       <p>Protein coverage is the share of proteins with at least one identified peptide. Sequence coverage is the share of a protein's amino acids that fall inside identified peptides. Both are measured against the reference proteins.</p></div>
     <div class="readouts" id="cv-read"></div>
     <div class="grid2">
@@ -225,7 +270,7 @@
       <figure class="card"><figcaption>Peptides by charge state</figcaption><canvas id="c-cv4" height="260"></canvas></figure>
     </div>
     <div class="card">
-      <div class="bar"><div class="kicker">Proteins</div>
+      <div class="bar"><div class="kicker">Proteins</div><span class="xp" data-export="db_coverage"></span>
         <select id="cv-filter"><option value="all">All proteins</option><option value="det">Detected</option><option value="miss">Not detected</option><option value="var">Has an alternative version</option></select>
         <input id="cv-search" type="search" placeholder="search protein or description…"></div>
       <div class="tscroll"><table class="tbl" id="t-cv"><thead><tr><th data-k="protein">Protein</th><th data-k="description">Description</th><th data-k="length">Length</th><th data-k="n_peptides">Peptides</th><th data-k="coverage_pct">Coverage %</th></tr></thead><tbody></tbody></table></div>
@@ -235,7 +280,7 @@
 
   <!-- DB 03 STANDARD SEARCH -->
   <section id="p-dbscatter" class="page">
-    <div class="lead"><div class="kicker">Database check · step 4</div><h2>Compared with the standard-database search</h2>
+    <div class="lead"><div class="kicker">Database check · step 6</div><h2>Compared with the standard-database search</h2>
       <p>Peptides identified when the same data were searched against the standard database only, against the search that included the alternative proteins.</p></div>
     <div class="readouts" id="db-sread"></div>
     <div class="grid2">
@@ -246,13 +291,9 @@
 
   <!-- DB 04 EXPORT -->
   <section id="p-dbexport" class="page">
-    <div class="lead"><div class="kicker">Database check · step 5</div><h2>Report and export</h2></div>
-    <div class="grid3">
-      <a class="card dl" href="/api/download/db_report" download><div class="kicker">PDF</div><h3>Final report</h3><p>The whole analysis explained in plain English, with figures, a results table, caveats, next steps and a glossary.</p></a>
-      <a class="card dl" href="/api/download/db_coverage" download><div class="kicker">CSV</div><h3>Coverage</h3><p>Every reference protein: length, number of peptides, percent of the sequence covered.</p></a>
-      <a class="card dl" href="/api/download/db_sites" download><div class="kicker">CSV</div><h3>Sites</h3><p>One row per differing position with its verdict and peptides.</p></a>
-      <a class="card dl" href="/api/download/db_peptides" download><div class="kicker">CSV</div><h3>Peptides</h3><p>Every peptide that spans a site, with start, end, charge, missed cleavages and intensity in each run.</p></a>
-    </div>
+    <div class="lead"><div class="kicker">Database check · step 7</div><h2>Report and export</h2><p>The PDF explains the whole analysis in plain English. Every table can also be downloaded on its own, in the format you choose; the ZIP holds all of them with the report.</p></div>
+    <div class="card bar"><label>Format <select id="fmt-d"><option value="csv">CSV</option><option value="tsv">TSV (tab-separated)</option><option value="xlsx">Excel (.xlsx)</option></select></label></div>
+    <div class="grid3" id="dx-grid"></div>
   </section>
 </main>
 <footer>Recode Detector <span id="ver"></span> · runs entirely on this computer</footer>
@@ -260,5 +301,6 @@
 <script src="bg.js"></script>
 <script src="app.js"></script>
 <script src="dbcompare.js"></script>
+<script src="features.js"></script>
 </body>
 </html>

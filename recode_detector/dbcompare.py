@@ -126,11 +126,26 @@ def pair_databases(ref: dict, alt: dict | None = None, marker: str = "") -> Pair
 @dataclass
 class PeptideTable:
     samples: list[str]
-    peptides: dict[str, dict]          # sequence -> {"charges": set, "intensity": np.ndarray, "groups": set}
+    peptides: dict[str, dict]          # sequence -> {"charges", "intensity", "groups", "precursors", "rt", "q"}
     n_precursors: int
+    prec_counts: list[int] = field(default_factory=list)       # precursors with signal, per run
+    pep_counts: list[int] = field(default_factory=list)        # unique peptides with signal, per run
+    total_intensity: list[float] = field(default_factory=list)
+    proteotypic: float | None = None
+    has_rt: bool = False
+    has_q: bool = False
+
+
+def _new_pep(n):
+    return {"charges": set(), "intensity": np.zeros(n), "groups": set(), "precursors": {}, "rt": None, "q": None}
+
+
+def _clean_run_name(c: str) -> str:
+    return re.sub(r"\.(raw|mzml|d|wiff|dia)$", "", str(c).split("/")[-1].split("\\")[-1], flags=re.I)
 
 
 def read_peptides(raw: bytes, filename: str = "") -> PeptideTable:
+    """DIA-NN precursor matrix (wide, one column per run) or the long-format report (one row per precursor and run)."""
     text = raw.decode("utf-8-sig", errors="replace")
     delim = "\t" if text[:5000].count("\t") >= text[:5000].count(",") else ","
     df = pd.read_csv(io.StringIO(text), sep=delim, dtype=str, keep_default_na=False, low_memory=False)
@@ -140,29 +155,110 @@ def read_peptides(raw: bytes, filename: str = "") -> PeptideTable:
         raise ValueError("No peptide-sequence column found (expected DIA-NN's “Stripped.Sequence”). "
                          "Load the precursor matrix, report.pr_matrix.tsv. Columns seen: "
                          + ", ".join(list(df.columns)[:8]))
+    mod_col, charge_col, group_col = lower.get("modified.sequence"), lower.get("precursor.charge") or lower.get("charge"), lower.get("protein.group")
+    proto_col = lower.get("proteotypic")
+    seqs = df[seq_col].str.upper().str.replace(r"[^A-Z]", "", regex=True).tolist()
+    long_fmt = "run" in lower and any(k in lower for k in ("precursor.quantity", "precursor.normalised"))
+
+    if long_fmt:
+        q_col = lower.get("precursor.normalised") or lower.get("precursor.quantity")
+        runs = sorted(df[lower["run"]].unique())
+        ridx = {r: i for i, r in enumerate(runs)}
+        peps: dict[str, dict] = {}
+        vals = pd.to_numeric(df[q_col], errors="coerce").fillna(0.0).to_numpy(float)
+        rts = pd.to_numeric(df[lower["rt"]], errors="coerce").to_numpy(float) if "rt" in lower else None
+        qv = pd.to_numeric(df[lower["q.value"]], errors="coerce").to_numpy(float) if "q.value" in lower else None
+        prec_by_run = np.zeros(len(runs))
+        pep_by_run = [set() for _ in runs]
+        total = np.zeros(len(runs))
+        rt_lists: dict[str, list] = {}
+        for i, sq in enumerate(seqs):
+            if not sq:
+                continue
+            r = ridx[df[lower["run"]].iat[i]]
+            p = peps.setdefault(sq, _new_pep(len(runs)))
+            p["intensity"][r] += vals[i]
+            ch = str(df[charge_col].iat[i]) if charge_col else ""
+            if ch:
+                p["charges"].add(ch)
+            ms = df[mod_col].iat[i] if mod_col else sq
+            pr = p["precursors"].setdefault((ms, ch), np.zeros(len(runs)))
+            pr[r] += vals[i]
+            if group_col:
+                p["groups"].add(df[group_col].iat[i])
+            if rts is not None and rts[i] == rts[i]:
+                rt_lists.setdefault(sq, []).append(rts[i])
+            if qv is not None and qv[i] == qv[i]:
+                p["q"] = qv[i] if p["q"] is None else min(p["q"], qv[i])
+            if vals[i] > 0:
+                prec_by_run[r] += 1
+                pep_by_run[r].add(sq)
+                total[r] += vals[i]
+        for sq, lst in rt_lists.items():
+            peps[sq]["rt"] = float(np.median(lst))
+        proteo = float(pd.to_numeric(df[proto_col], errors="coerce").mean()) if proto_col else None
+        return PeptideTable([_clean_run_name(r) for r in runs], peps, len(df), prec_by_run.astype(int).tolist(),
+                            [len(x) for x in pep_by_run], total.tolist(), proteo, rts is not None, qv is not None)
+
     sample_cols = [c for c in df.columns if c.lower().strip() not in META_COLS
                    and pd.to_numeric(df[c], errors="coerce").notna().mean() > 0.2]
     if not sample_cols:
         raise ValueError("No intensity columns found next to the peptide sequences.")
     inten = df[sample_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0).to_numpy(float)
-    charge_col = lower.get("precursor.charge") or lower.get("charge")
-    group_col = lower.get("protein.group")
-    peps: dict[str, dict] = {}
-    seqs = df[seq_col].str.upper().str.replace(r"[^A-Z]", "", regex=True).tolist()
-    for i, s in enumerate(seqs):
-        if not s:
+    peps = {}
+    for i, sq in enumerate(seqs):
+        if not sq:
             continue
-        p = peps.setdefault(s, {"charges": set(), "intensity": np.zeros(len(sample_cols)), "groups": set()})
+        p = peps.setdefault(sq, _new_pep(len(sample_cols)))
         p["intensity"] += inten[i]
-        if charge_col:
-            p["charges"].add(str(df[charge_col].iat[i]))
+        ch = str(df[charge_col].iat[i]) if charge_col else ""
+        if ch:
+            p["charges"].add(ch)
+        ms = df[mod_col].iat[i] if mod_col else sq
+        pr = p["precursors"].setdefault((ms, ch), np.zeros(len(sample_cols)))
+        pr += inten[i]
         if group_col:
             p["groups"].add(df[group_col].iat[i])
-    names = [re.sub(r"\.(raw|mzml|d|wiff|dia)$", "", c.split("/")[-1].split("\\")[-1], flags=re.I) for c in sample_cols]
-    return PeptideTable(names, peps, len(df))
+    keep = np.array([bool(x) for x in seqs])
+    prec_counts = (inten[keep] > 0).sum(axis=0).astype(int).tolist()
+    pep_counts = [sum(1 for p in peps.values() if p["intensity"][j] > 0) for j in range(len(sample_cols))]
+    proteo = float(pd.to_numeric(df[proto_col], errors="coerce").mean()) if proto_col else None
+    return PeptideTable([_clean_run_name(c) for c in sample_cols], peps, len(df), prec_counts, pep_counts,
+                        inten[keep].sum(axis=0).tolist(), proteo)
 
 
 # ---------------------------------------------------------------- site evidence
+
+def tryptic_cuts(seq: str) -> list[int]:
+    return [0] + [i + 1 for i in range(len(seq) - 1) if seq[i] in "KR" and seq[i + 1] != "P"] + [len(seq)]
+
+
+def expected_peptides(seq: str, q: int, lo: int = 7, hi: int = 30) -> dict:
+    """The tryptic peptides (up to one missed cleavage) that would span position q, and whether a search could see them."""
+    cuts = tryptic_cuts(seq)
+    k = max(i for i in range(len(cuts) - 1) if cuts[i] <= q)
+    opts = []
+    for a_ in (k - 1, k):
+        for b_ in (k + 1, k + 2):
+            if a_ >= 0 and b_ < len(cuts) and cuts[a_] <= q < cuts[b_]:
+                opts.append((cuts[a_], cuts[b_]))
+    opts = sorted(set(opts), key=lambda t: t[1] - t[0])
+    cleaved = [(cuts[k], cuts[k + 1])]
+    rows = [{"sequence": seq[a_:b_], "start": a_ + 1, "end": b_, "length": b_ - a_,
+             "detectable": lo <= b_ - a_ <= hi, "missed_cleavages": _missed(seq[a_:b_])} for a_, b_ in opts]
+    full = rows[0] if rows else None
+    best = next((r for r in rows if r["detectable"]), None)
+    first = {"sequence": seq[cleaved[0][0]:cleaved[0][1]], "length": cleaved[0][1] - cleaved[0][0]}
+    if best:
+        note = f"{best['sequence']} ({best['length']} residues) can be detected"
+    elif full:
+        note = (f"the peptide here would be {first['sequence']} ({first['length']} residues): "
+                f"{'too short' if first['length'] < lo else 'too long'} to be detected"
+                + (f"; with a missed cleavage {full['sequence']} ({full['length']})" if full['length'] != first['length'] else ""))
+    else:
+        note = "no peptide of a detectable length spans this position"
+    return {"candidates": rows, "detectable": best is not None, "first": first, "note": note}
+
 
 def _missed(pep: str) -> int:
     return sum(1 for i in range(len(pep) - 1) if pep[i] in "KR" and pep[i + 1] != "P")
@@ -284,7 +380,8 @@ def analyse(pairing: Pairing, table: PeptideTable, table_b: PeptideTable | None 
                    "description": pr.ref_header[len(pr.ref_id):].strip()[:160],
                    "context_ref": pr.ref_seq[max(0, q - 7):q] + "[" + pr.ref_seq[q] + "]" + pr.ref_seq[q + 1:q + 8],
                    "context_alt": pr.alt_seq[max(0, q - 7):q] + "[" + pr.alt_seq[q] + "]" + pr.alt_seq[q + 1:q + 8],
-                   "ref_peptides": [], "alt_peptides": [], "ref_peptides_b": []}
+                   "ref_peptides": [], "alt_peptides": [], "ref_peptides_b": [],
+                   "expected_ref": expected_peptides(pr.ref_seq, q), "expected_alt": expected_peptides(pr.alt_seq, q)}
             own_ref = pr.ref_seq
             for version, seq in (("ref", pr.ref_seq), ("alt", pr.alt_seq)):
                 for pep, start in _spanning(seq, q, pep_a):
@@ -294,7 +391,8 @@ def analyse(pairing: Pairing, table: PeptideTable, table_b: PeptideTable | None 
                         other = _count(ref_blob, pep) + _count(alt_blob, pep) - _count(pr.alt_seq, pep)
                     rec = {"sequence": pep, "start": start + 1, "end": start + len(pep),
                            "charges": sorted(pep_a[pep]["charges"]), "missed_cleavages": _missed(pep),
-                           "intensity": pep_a[pep]["intensity"].tolist(),
+                           "intensity": pep_a[pep]["intensity"].tolist(), "rt": pep_a[pep]["rt"], "q": pep_a[pep]["q"],
+                           "precursors": [[m, z] for (m, z) in pep_a[pep]["precursors"]],
                            "total_intensity": float(pep_a[pep]["intensity"].sum()),
                            "also_elsewhere": bool(other > 0),
                            "seen_in_b": pep in pep_b}
@@ -346,6 +444,8 @@ def sites_frame(res: Result) -> pd.DataFrame:
             "reference_intensity": sum(p["total_intensity"] for p in s["ref_peptides"] if not p["also_elsewhere"]),
             "alternative_intensity": sum(p["total_intensity"] for p in s["alt_peptides"] if not p["also_elsewhere"]),
             "reference_peptides_in_standard_search": ";".join(p["sequence"] for p in s["ref_peptides_b"]),
+            "reference_version_detectable": s["expected_ref"]["detectable"], "alternative_version_detectable": s["expected_alt"]["detectable"],
+            "reference_detectability_note": s["expected_ref"]["note"], "alternative_detectability_note": s["expected_alt"]["note"],
             "context_reference": s["context_ref"], "context_alternative": s["context_alt"],
             "description": s["description"]})
     return pd.DataFrame(rows)

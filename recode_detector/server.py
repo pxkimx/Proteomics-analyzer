@@ -14,13 +14,15 @@ from urllib.parse import parse_qs, urlparse
 import numpy as np
 import pandas as pd
 
-from . import __version__, dbcompare, loaders, pipeline, report, stats
+from . import __version__, dbcompare, exports, loaders, msms, pipeline, qc as qcmod, report, stats
 from .example import example_bytes, simulate_db
+from .history import RunStore
 from .lifecycle import Lifecycle
 
 WEB = Path(__file__).resolve().parent / "web"
 DEFAULT_PORT = 8775
 MAX_UPLOAD = 400 * 1024 * 1024
+STORE = RunStore()
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css",
          ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon"}
 
@@ -62,6 +64,11 @@ class Session:
         self.result_meta: dict = {}
         self.is_example = False
         self.kinds: list[str] = []
+        self.kind: str | None = None
+        self.run_id: str | None = None
+        self.qc_checks: list[dict] = []
+        self.sample_qc: pd.DataFrame = pd.DataFrame()
+        self.enrich_df: pd.DataFrame = pd.DataFrame()
 
     # ---- operations (each returns a JSON-ready dict)
     def state(self) -> dict:
@@ -73,7 +80,10 @@ class Session:
                         "notes": d.notes, "removed": d.removed, "n_proteins": int(len(d.matrix)),
                         "kinds": self._kinds(), "missing_pct": float(d.matrix.isna().values.mean() * 100)})
         if self.proc is not None:
-            out.update({"qc": self.qc, "levels": sorted(set(self.proc.groups.values())), "log": self.proc.log})
+            out.update({"qc": self.qc, "levels": sorted(set(self.proc.groups.values())), "log": self.proc.log,
+                        "checks": self.qc_checks, "check_summary": qcmod.summarise(self.qc_checks),
+                        "sample_qc": self.sample_qc.to_dict("records")})
+        out["run_id"] = self.run_id
         return out
 
     def _kinds(self) -> list[str]:
@@ -98,6 +108,7 @@ class Session:
         ds = loaders.load(raw, name, kind)
         with self.lock:
             self.reset()
+            self.kind = kind
             self.filename, self.raw_bytes, self.dataset, self.is_example = name, raw, ds, example
             self.groups = loaders.guess_groups(ds.samples)
             self.kinds = []
@@ -121,10 +132,24 @@ class Session:
             p = pipeline.Params.from_dict(params)
             self.proc = pipeline.process(self.dataset.matrix, self.groups, p)
             self.qc = pipeline.qc_summary(self.dataset.matrix, self.proc)
+            self.qc_checks, self.sample_qc = qcmod.quant_checks(self.dataset.matrix, self.proc, self.qc)
             self.result = None
+            self.enrich_df = pd.DataFrame()
             levels = sorted(set(self.proc.groups.values()))
-            return {"qc": self.qc, "log": self.proc.log, "groups": levels,
-                    "filtered_out": self.proc.filtered_out}
+            self._autosave(params)
+            return {"qc": self.qc, "log": self.proc.log, "groups": levels, "filtered_out": self.proc.filtered_out,
+                    "checks": self.qc_checks, "check_summary": qcmod.summarise(self.qc_checks),
+                    "sample_qc": self.sample_qc.to_dict("records"), "run_id": self.run_id}
+
+    def _autosave(self, processing: dict):
+        if self.is_example or self.raw_bytes is None:
+            return
+        name = Path(self.filename).stem + " (quantification)"
+        meta = STORE.save("quant", name, {"data": (self.filename, self.raw_bytes)},
+                          {"kind": self.kind, "groups": self.groups, "processing": processing, "comparison": None},
+                          {"samples": len(self.proc.groups), "proteins_kept": int(len(self.proc.log_raw)),
+                           "groups": sorted(set(self.proc.groups.values()))}, fp_keys=["kind", "groups", "processing"])
+        self.run_id = meta["id"]
 
     def compare(self, a: str, b: str, method: str, use: str, fdr: float, lfc: float) -> dict:
         with self.lock:
@@ -135,6 +160,11 @@ class Session:
             self.result = res
             self.result_meta = {"a": a, "b": b, "method": method, "use": use, "fdr": fdr, "lfc": lfc,
                                 "prior_df": res.attrs.get("prior_df")}
+            if self.run_id:
+                try:
+                    STORE.update(self.run_id, params={"comparison": {"a": a, "b": b, "method": method, "use": use, "fdr": fdr, "lfc": lfc}})
+                except ValueError:
+                    pass
             order = res.sort_values("p_value", na_position="last")
             counts = res["call"].value_counts().to_dict()
             sig = order[order["call"] != "ns"]
@@ -155,31 +185,46 @@ class Session:
             r = self.result
             hits = r[r["call"].isin(["up", "down"] if direction == "both" else [direction])]["gene"]
             out = stats.enrichment(list(hits), list(r["gene"]), sets)
+            self.enrich_df = out
             return {"n_hits": int(len(hits)), "n_sets": len(sets), "rows": out.head(200).to_dict("records")}
 
-    def csv(self, which: str) -> tuple[str, bytes]:
+    def open_run(self, meta: dict, files: dict) -> dict:
+        name, raw = files["data"]
+        prm = meta["params"]
+        st = self.load(raw, name, prm.get("kind"))
+        self.set_groups(prm.get("groups", {}))
+        an = self.analyse(prm.get("processing", {}))
+        cmp_ = None
+        c = prm.get("comparison")
+        if c:
+            try:
+                cmp_ = self.compare(c["a"], c["b"], c["method"], c["use"], c["fdr"], c["lfc"])
+            except ValueError:
+                cmp_ = None
+        self.run_id = meta["id"]
+        return {"mode": "quant", "state": self.state(), "analysis": an, "comparison": cmp_, "params": prm}
+
+    def tables(self) -> dict[str, pd.DataFrame]:
+        out: dict[str, pd.DataFrame] = {}
+        if self.result is not None:
+            out["differential_results"] = self.result.sort_values("p_value")
+        if self.proc is not None:
+            m = self.proc.log_imp.copy()
+            m.insert(0, "gene", self.dataset.genes.reindex(m.index).values)
+            m.index.name = "protein"
+            out["processed_matrix"] = m.reset_index()
+            out["qc_checks"] = pd.DataFrame(self.qc_checks)
+            out["sample_qc"] = self.sample_qc
+        if len(self.enrich_df):
+            out["enrichment"] = self.enrich_df
+        return out
+
+    def settings_json(self) -> bytes:
         with self.lock:
-            buf = io.StringIO()
-            if which == "results":
-                if self.result is None:
-                    raise ValueError("Run a comparison first.")
-                m = self.result_meta
-                self.result.sort_values("p_value").to_csv(buf, index=False)
-                return f"differential_{m['a']}_vs_{m['b']}.csv", buf.getvalue().encode()
-            if which == "processed":
-                self._need_analysis()
-                out = self.proc.log_imp.copy()
-                out.insert(0, "gene", self.dataset.genes.reindex(out.index).values)
-                out.index.name = "protein"
-                out.to_csv(buf)
-                return "processed_log2_intensities.csv", buf.getvalue().encode()
-            if which == "settings":
-                self._need_analysis()
-                return "analysis_settings.json", json.dumps(
-                    {"version": __version__, "file": self.filename, "groups": self.groups,
-                     "parameters": self.proc.params.__dict__, "steps": self.proc.log,
-                     "comparison": self.result_meta}, indent=2, default=str).encode()
-        raise ValueError("unknown download")
+            self._need_analysis()
+            return json.dumps({"version": __version__, "file": self.filename, "groups": self.groups,
+                               "parameters": self.proc.params.__dict__, "steps": self.proc.log,
+                               "comparison": self.result_meta}, indent=2, default=str).encode()
 
     def _need_data(self):
         if self.dataset is None:
@@ -192,48 +237,62 @@ class Session:
 
 
 class DbSession:
-    """Inputs and result of the database-comparison mode."""
+    """Inputs and result of the database-check mode."""
 
     SLOTS = ("report", "report_b", "fasta_ref", "fasta_alt")
 
     def __init__(self):
         self.lock = threading.RLock()
+        self.job: msms.SpectraJob | None = None
         self.reset()
 
     def reset(self):
-        self.files: dict[str, dict] = {}            # slot -> {"name", "text"/"table"}
+        self.files: dict[str, dict] = {}            # slot -> {"name", "raw", "table"/"fasta", "detail"}
         self.result: dbcompare.Result | None = None
+        self.pairing = None
+        self.marker = ""
+        self.run_id: str | None = None
         self.is_example = False
+        self.qc: dict = {}
+        self.spec: dict | None = None
 
+    # ---- state
     def state(self) -> dict:
         info = {k: {"name": v["name"], "detail": v["detail"]} for k, v in self.files.items()}
         out = {"files": info, "ready": "report" in self.files and "fasta_ref" in self.files,
-               "is_example": self.is_example, "has_result": self.result is not None}
+               "is_example": self.is_example, "has_result": self.result is not None, "run_id": self.run_id,
+               "raw_reader": bool(msms.find_thermo_parser()), "job": self.job.public() if self.job else None}
         if self.result is not None:
             out["result"] = self._payload()
         return out
 
+    def _payload(self) -> dict:
+        r = self.result
+        return {"samples": r.samples, "sites": r.sites, "summary": r.summary, "scatter": r.scatter,
+                "coverage": r.coverage, "qc": self.qc, "spectra": self.spec}
+
+    # ---- inputs
     def load(self, slot: str, raw: bytes, name: str) -> dict:
         if slot not in self.SLOTS:
             raise ValueError("Unknown slot.")
         with self.lock:
             if slot in ("report", "report_b"):
                 t = dbcompare.read_peptides(raw, name)
-                self.files[slot] = {"name": name, "table": t,
-                                    "detail": f"{len(t.peptides):,} peptides, {len(t.samples)} run(s)"}
+                kind = "long-format report" if t.has_rt else "precursor matrix"
+                self.files[slot] = {"name": name, "raw": raw, "table": t,
+                                    "detail": f"{len(t.peptides):,} peptides, {len(t.samples)} run(s), {kind}"}
             else:
-                text = raw.decode("utf-8-sig", errors="replace")
-                fa = dbcompare.parse_fasta(text)
+                fa = dbcompare.parse_fasta(raw.decode("utf-8-sig", errors="replace"))
                 if not fa:
                     raise ValueError("No FASTA entries found (lines starting with “>”).")
-                self.files[slot] = {"name": name, "fasta": fa, "detail": f"{len(fa):,} proteins"}
-            self.result = None
+                self.files[slot] = {"name": name, "raw": raw, "fasta": fa, "detail": f"{len(fa):,} proteins"}
+            self.result, self.run_id, self.spec, self.qc = None, None, None, {}
             return self.state()
 
     def drop(self, slot: str) -> dict:
         with self.lock:
             self.files.pop(slot, None)
-            self.result = None
+            self.result, self.run_id, self.spec, self.qc = None, None, None, {}
             return self.state()
 
     def example(self) -> dict:
@@ -248,6 +307,7 @@ class DbSession:
             self.load(slot, e[key].encode(), name)
         return self.state()
 
+    # ---- analysis
     def run(self, marker: str) -> dict:
         with self.lock:
             if "report" not in self.files or "fasta_ref" not in self.files:
@@ -260,33 +320,249 @@ class DbSession:
                                  + (f" ({len(pairing.unpaired)} alternative proteins could not be paired: "
                                     "they have no reference protein of the same length)." if pairing.unpaired else "."))
             b = self.files["report_b"]["table"] if "report_b" in self.files else None
-            self.result = dbcompare.analyse(pairing, self.files["report"]["table"], b)
-            self.marker = marker.strip()
+            table = self.files["report"]["table"]
+            self.result = dbcompare.analyse(pairing, table, b)
+            self.pairing, self.marker = pairing, marker.strip()
+            checks, runs = qcmod.db_checks(table, self.result.coverage)
+            self.qc = {"checks": checks, "runs": runs.to_dict("records"), "summary": qcmod.summarise(checks)}
+            self.spec = None
+            if not self.is_example:
+                st = self.result.summary["status"]
+                meta = STORE.save("db", Path(self.files["report"]["name"]).stem + " (database check)",
+                                  {slot: (v["name"], v["raw"]) for slot, v in self.files.items()}, {"marker": self.marker},
+                                  {"sites": self.result.summary["n_sites"], "alternative": st["alternative"],
+                                   "reference": st["reference"], "both": st["both"], "none": st["none"],
+                                   "peptides": self.result.summary["n_peptides"]}, fp_keys=["marker"])
+                self.run_id = meta["id"]
+                self.spec = STORE.load_extra(self.run_id, "spectra")
             return self._payload()
 
-    def _payload(self) -> dict:
-        r = self.result
-        return {"samples": r.samples, "sites": r.sites, "summary": r.summary, "scatter": r.scatter,
-                "coverage": r.coverage}
+    def open_run(self, meta: dict, files: dict) -> dict:
+        with self.lock:
+            self.reset()
+            for slot, (name, raw) in files.items():
+                self.load(slot, raw, name)
+            self.run(meta["params"].get("marker", ""))
+            self.run_id = meta["id"]
+            self.spec = STORE.load_extra(self.run_id, "spectra")
+        return {"mode": "db", "state": self.state(), "params": meta["params"]}
 
-    def csv(self, which: str) -> tuple[str, bytes]:
+    # ---- spectrum evidence
+    def _best_precursor(self, seq: str):
+        table = self.files["report"]["table"]
+        p = table.peptides.get(seq)
+        if not p or not p["precursors"]:
+            return seq, 2
+        (modseq, z), _ = max(p["precursors"].items(), key=lambda kv: float(np.sum(kv[1])))
+        return modseq, int(z) if str(z).isdigit() else 2
+
+    def default_targets(self, site_indexes: list[int] | None = None) -> list[dict]:
+        out, seen = [], set()
+        sites = self.result.sites
+        for i, s in enumerate(sites):
+            if site_indexes is not None and i not in site_indexes:
+                continue
+            if site_indexes is None and s["status"] == "none":
+                continue
+            pr = next(p for p in self.pairing.pairs if p.ref_id == s["ref_protein"] and p.alt_id == s["alt_protein"])
+            q = s["position"] - 1
+            for version, key in (("alternative", "alt_peptides"), ("reference", "ref_peptides")):
+                cand = sorted((p for p in s[key] if not p["also_elsewhere"]), key=lambda p: -p["total_intensity"])
+                if not cand:
+                    continue
+                pep = cand[0]
+                modseq, z = self._best_precursor(pep["sequence"])
+                idx = q - (pep["start"] - 1)
+                other_seq = (pr.ref_seq if version == "alternative" else pr.alt_seq)[pep["start"] - 1:pep["end"]]
+                pair = f"{i}|{pep['start']}-{pep['end']}"
+                for ver, ms, role in ((version, modseq, "observed"),
+                                      ("reference" if version == "alternative" else "alternative",
+                                       msms.swap_residue(modseq, idx, other_seq[idx]), "counterpart")):
+                    k = f"{pair}|{ver}"
+                    if k in seen:
+                        continue
+                    seen.add(k)
+                    rt_hint = None
+                    if role == "observed" and self.files["report"]["table"].has_rt:
+                        rt_hint = self.files["report"]["table"].peptides[pep["sequence"]].get("rt")   # DIA-NN's own retention time
+                    out.append({"key": k, "site": i, "version": ver, "role": role, "modified": ms, "charge": z,
+                                "changed": [idx], "pair": pair, "rt": rt_hint})
+        return out[:60]
+
+    def spectra_start(self, path: str, ppm: float, half_window: float, sites: list[int] | None = None) -> dict:
         with self.lock:
             if self.result is None:
                 raise ValueError("Run the comparison first.")
-            if which == "db_report":
-                names = {k: v["name"] for k, v in self.files.items()}
-                return "database_comparison_report.pdf", report.build_pdf(self.result, names)
-            frames = {"db_sites": (dbcompare.sites_frame, "sites"), "db_peptides": (dbcompare.peptides_frame, "peptides"),
-                      "db_coverage": (dbcompare.coverage_frame, "coverage")}
-            if which not in frames:
-                raise ValueError("unknown download")
-            fn, label = frames[which]
-            return f"database_comparison_{label}.csv", fn(self.result).to_csv(index=False).encode()
+            if self.job is not None and self.job.status in ("queued", "running"):
+                raise ValueError("A spectrum check is already running.")
+            path = str(path).strip().strip('"').strip("'")
+            if not path or not Path(path).is_file():
+                raise ValueError(f"File not found: {path or '(no path given)'}")
+            if not path.lower().endswith(msms.RAW_EXT + msms.MZML_EXT):
+                raise ValueError("Use a Thermo .raw file or an mzML / mzML.gz file.")
+            targets = self.default_targets(sites)
+            if not targets:
+                raise ValueError("No site has an identified peptide to check yet.")
+            job = msms.SpectraJob(id=str(int(__import__("time").time() * 1000)))
+            self.job = job
+        threading.Thread(target=self._run_job, args=(job, path, targets, ppm, half_window), daemon=True).start()
+        return {"job": job.public(), "n_targets": len(targets)}
+
+    def _run_job(self, job, path, targets, ppm, hw):
+        msms.run_job(job, path, targets, ppm, hw)
+        if job.status == "done":
+            with self.lock:
+                self.spec = {"path": path, "params": {"ppm": ppm, "half_window": hw}, "source": job.source_info,
+                             "results": job.results, "custom": (self.spec or {}).get("custom", [])}
+                if self.run_id:
+                    try:
+                        STORE.save_extra(self.run_id, "spectra", self.spec)
+                        STORE.update(self.run_id, params={"spectra_path": path})
+                    except ValueError:
+                        pass
+
+    def spectra_peptide(self, path: str, sequence: str, charge: int, ppm: float, half_window: float) -> dict:
+        with self.lock:
+            if self.job is not None and self.job.status in ("queued", "running"):
+                raise ValueError("A spectrum check is already running.")
+            path = str(path).strip().strip('"').strip("'")
+            if not path or not Path(path).is_file():
+                raise ValueError(f"File not found: {path or '(no path given)'}")
+            seq = sequence.strip().replace(" ", "")
+            if not seq:
+                raise ValueError("Enter a peptide sequence.")
+            msms.parse_modified(seq)                      # fails early on unknown letters
+            if not 1 <= int(charge) <= 6:
+                raise ValueError("Charge must be between 1 and 6.")
+            job = msms.SpectraJob(id=str(int(__import__("time").time() * 1000)))
+            self.job = job
+        target = {"key": "custom|" + seq, "site": None, "version": "custom", "modified": seq, "charge": int(charge), "changed": []}
+
+        def go():
+            msms.run_job(job, path, [target], ppm, half_window)
+            if job.status == "done" and job.results:
+                with self.lock:
+                    self.spec = self.spec or {"path": path, "params": {"ppm": ppm, "half_window": half_window},
+                                              "source": job.source_info, "results": [], "custom": []}
+                    self.spec["custom"] = ([job.results[0]] + self.spec.get("custom", []))[:12]
+                    if self.run_id:
+                        try:
+                            STORE.save_extra(self.run_id, "spectra", self.spec)
+                        except ValueError:
+                            pass
+        threading.Thread(target=go, daemon=True).start()
+        return {"job": job.public()}
+
+    def spectra_status(self) -> dict:
+        with self.lock:
+            return {"job": self.job.public() if self.job else None, "spectra": self.spec}
+
+    def spectra_cancel(self) -> dict:
+        with self.lock:
+            if self.job is not None:
+                self.job.cancel.set()
+            msms.kill_children()
+            return {"ok": True}
+
+    # ---- tables and downloads
+    def tables(self) -> dict[str, pd.DataFrame]:
+        if self.result is None:
+            return {}
+        out = {"sites": dbcompare.sites_frame(self.result), "peptides": dbcompare.peptides_frame(self.result),
+               "coverage": dbcompare.coverage_frame(self.result)}
+        if self.qc:
+            out["qc_checks"] = pd.DataFrame(self.qc["checks"])
+            out["qc_runs"] = pd.DataFrame(self.qc["runs"])
+        if self.spec and self.spec.get("results"):
+            out["spectra"], out["spectra_ions"] = msms.spectra_frames(self.spec["results"], self.result.sites)
+        return out
+
+    def pdf(self) -> bytes:
+        with self.lock:
+            if self.result is None:
+                raise ValueError("Run the comparison first.")
+            names = {k: v["name"] for k, v in self.files.items()}
+            kw = {"note": "SIMULATED EXAMPLE: invented proteins and peptides, not real results."} if self.is_example else {}
+            return report.build_pdf(self.result, names, qc=self.qc, spectra=self.spec, **kw)
 
 
 SESSION = Session()
 DB = DbSession()
 LIFE: Lifecycle | None = None
+
+DB_TABLES = {"db_sites": "sites", "db_peptides": "peptides", "db_coverage": "coverage", "db_qc_checks": "qc_checks",
+             "db_qc_runs": "qc_runs", "db_spectra": "spectra", "db_spectra_ions": "spectra_ions"}
+Q_TABLES = {"results": "differential_results", "processed": "processed_matrix", "qc_checks": "qc_checks",
+            "sample_qc": "sample_qc", "enrichment": "enrichment"}
+
+
+def runs_payload() -> dict:
+    runs = []
+    for m in STORE.list():
+        runs.append({k: m.get(k) for k in ("id", "kind", "name", "created", "updated", "note", "summary", "disk_bytes")}
+                    | {"files": {k: v.get("name") for k, v in m.get("files", {}).items()},
+                       "has_spectra": bool(m.get("params", {}).get("spectra_path"))})
+    return {"runs": runs, "root": str(STORE.root)}
+
+
+def open_run(run_id: str) -> dict:
+    meta = STORE.get(run_id)
+    files = STORE.load_files(run_id)
+    return SESSION.open_run(meta, files) if meta["kind"] == "quant" else DB.open_run(meta, files)
+
+
+def pick_file() -> str:
+    if sys.platform != "darwin":
+        raise ValueError("The file picker is only available on macOS. Type or paste the path instead.")
+    import subprocess
+    r = subprocess.run(["osascript", "-e", 'POSIX path of (choose file with prompt "Choose a Thermo .raw or mzML file")'],
+                       capture_output=True, text=True, timeout=900)
+    if r.returncode != 0:
+        raise ValueError("No file was chosen.")
+    return r.stdout.strip()
+
+
+def build_download(which: str, fmt: str) -> tuple[str, bytes, str]:
+    fmt = (fmt or "csv").lower()
+    if which == "db_report":
+        return "recode_detector_report.pdf", DB.pdf(), "application/pdf"
+    if which == "settings":
+        return "analysis_settings.json", SESSION.settings_json(), "application/json"
+    if which == "runs":
+        df = pd.DataFrame([{"name": r["name"], "kind": r["kind"], "created": pd.to_datetime(r["created"], unit="s"),
+                            "updated": pd.to_datetime(r["updated"], unit="s"), "note": r["note"],
+                            "files": ", ".join(r["files"].values())} for r in runs_payload()["runs"]])
+        return f"saved_runs.{fmt}", exports.frame_bytes(df, fmt, "Runs"), exports.FORMATS[fmt]
+    if which in ("zip_db", "zip_quant"):
+        if which == "zip_db":
+            tables, extras = DB.tables(), {}
+            if not tables:
+                raise ValueError("Run the comparison first.")
+            try:
+                extras["recode_detector_report.pdf"] = DB.pdf()
+            except ValueError:
+                pass
+            return "recode_detector_database_check.zip", exports.zip_bytes(tables, extras, fmt), "application/zip"
+        tables = SESSION.tables()
+        if not tables:
+            raise ValueError("Run the processing step first.")
+        extras = {}
+        try:
+            extras["analysis_settings.json"] = SESSION.settings_json()
+        except ValueError:
+            pass
+        return "recode_detector_quantification.zip", exports.zip_bytes(tables, extras, fmt), "application/zip"
+    if which in DB_TABLES:
+        df = DB.tables().get(DB_TABLES[which])
+        label = DB_TABLES[which]
+    elif which in Q_TABLES:
+        df = SESSION.tables().get(Q_TABLES[which])
+        label = Q_TABLES[which]
+    else:
+        raise ValueError("Unknown download.")
+    if df is None:
+        raise ValueError("That table is not available yet. Run the analysis first.")
+    return f"{label}.{fmt}", exports.frame_bytes(df, fmt, label), exports.FORMATS[fmt]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -338,14 +614,18 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/protein":
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
             return self._guard(lambda: SESSION.protein(q.get("id", "")))
+        if u.path == "/api/runs":
+            return self._guard(runs_payload)
+        if u.path == "/api/db/spectra/status":
+            return self._guard(DB.spectra_status)
         if u.path.startswith("/api/download/"):
+            q = {k: v[0] for k, v in parse_qs(u.query).items()}
             try:
-                which = u.path.rsplit("/", 1)[1]
-                name, data = DB.csv(which) if which.startswith("db_") else SESSION.csv(which)
+                name, data, ctype = build_download(u.path.rsplit("/", 1)[1], q.get("fmt", "csv"))
             except ValueError as e:
                 return self._json({"error": str(e)}, 400)
-            ctype = ("application/json" if name.endswith(".json") else
-                     "application/pdf" if name.endswith(".pdf") else "text/csv")
+            except Exception as e:
+                return self._json({"error": f"{type(e).__name__}: {e}"}, 500)
             return self._send(200, data, ctype, {"Content-Disposition": f'attachment; filename="{name}"'})
         rel = "index.html" if u.path in ("/", "") else u.path.lstrip("/")
         f = (WEB / rel).resolve()
@@ -388,6 +668,28 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/enrich":
             d = js()
             return self._guard(lambda: SESSION.enrich(d.get("gmt", ""), d.get("direction", "both")))
+        if u.path == "/api/runs/open":
+            return self._guard(lambda: open_run(q.get("id", "")))
+        if u.path == "/api/runs/rename":
+            d = js()
+            return self._guard(lambda: (STORE.rename(d.get("id", ""), d.get("name", "")), runs_payload())[1])
+        if u.path == "/api/runs/note":
+            d = js()
+            return self._guard(lambda: (STORE.set_note(d.get("id", ""), d.get("note", "")), runs_payload())[1])
+        if u.path == "/api/runs/delete":
+            return self._guard(lambda: (STORE.delete(q.get("id", "")), runs_payload())[1])
+        if u.path == "/api/pick":
+            return self._guard(lambda: {"path": pick_file()})
+        if u.path == "/api/db/spectra/start":
+            d = js()
+            return self._guard(lambda: DB.spectra_start(d.get("path", ""), float(d.get("ppm", 10)),
+                                                        float(d.get("half_window", 0.15)), d.get("sites")))
+        if u.path == "/api/db/spectra/peptide":
+            d = js()
+            return self._guard(lambda: DB.spectra_peptide(d.get("path", ""), d.get("sequence", ""), int(d.get("charge", 2)),
+                                                          float(d.get("ppm", 10)), float(d.get("half_window", 0.15))))
+        if u.path == "/api/db/spectra/cancel":
+            return self._guard(DB.spectra_cancel)
         if u.path == "/api/quit":
             self._json({"ok": True})
             if LIFE:
@@ -423,6 +725,10 @@ def serve(port: int = DEFAULT_PORT, open_browser: bool = True) -> None:
 
     def quit_():
         sys.stdout.flush()
+        try:
+            msms.kill_children()                 # never leave a converter running after the program quits
+        except Exception:
+            pass
         os._exit(0)
 
     LIFE = Lifecycle(on_quit=quit_)

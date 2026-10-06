@@ -35,11 +35,11 @@ const order = ['data', 'groups', 'process', 'qc', 'diff', 'enrich', 'export'];
 function reach() {
   const st = S.st, r = DBS.result;
   return { data: true, groups: st.loaded, process: st.loaded, qc: st.analysed, diff: st.analysed, enrich: !!S.comp, export: st.analysed,
-    dbfiles: true, dbsites: !!r, dbcover: !!r, dbscatter: !!(r && r.summary.has_b), dbexport: !!r };
+    runs: true, dbfiles: true, dbsites: !!r, dbspectra: !!r, dbcover: !!r, dbqc: !!r, dbscatter: !!(r && r.summary.has_b), dbexport: !!r };
 }
 function updateNav() {
   const r = reach();
-  $$('#nav button').forEach(b => { b.hidden = b.dataset.mode !== S.mode; b.disabled = !r[b.dataset.page]; });
+  $$('#nav button').forEach(b => { b.hidden = b.dataset.mode !== S.mode && b.dataset.mode !== 'both'; b.disabled = !r[b.dataset.page]; });
   $$('#mode button').forEach(b => b.classList.toggle('on', b.dataset.mode === S.mode));
 }
 function setMode(m) {
@@ -51,7 +51,7 @@ function show(page) {
   if (!reach()[page]) return;
   $$('.page').forEach(p => p.classList.toggle('on', p.id === 'p-' + page));
   $$('#nav button').forEach(b => b.classList.toggle('on', b.dataset.page === page));
-  S.page = page; S.last[page.startsWith('db') ? 'db' : 'quant'] = page; scrollTo(0, 0); requestAnimationFrame(() => redraw(page));
+  S.page = page; if (page !== 'runs') S.last[page.startsWith('db') ? 'db' : 'quant'] = page; scrollTo(0, 0); requestAnimationFrame(() => redraw(page));
 }
 $('#nav').addEventListener('click', e => { const b = e.target.closest('button'); if (b) show(b.dataset.page); });
 document.addEventListener('click', e => { const g = e.target.closest('[data-go]'); if (g) show(g.dataset.go); });
@@ -118,7 +118,8 @@ $('#run').onclick = () => busy($('#run'), async () => {
   const params = { normalization: $('#pr-norm').value, imputation: $('#pr-imp').value, min_valid: +$('#pr-min').value,
     valid_rule: $('#pr-rule').value, downshift: +$('#pr-shift').value, width: +$('#pr-width').value, seed: +$('#pr-seed').value };
   const r = await api('/api/analyze', { params });
-  S.qc = r.qc; S.comp = null; S.st.analysed = true; S.levels = r.groups;
+  S.qc = r.qc; S.checks = r.checks; S.sampleQc = r.sample_qc; S.comp = null; S.st.analysed = true; S.levels = r.groups;
+  if (r.run_id) toast('Saved to Runs', true);
   $('#pr-log').textContent = r.log.join('\n');
   const opts = r.groups.map(g => `<option>${esc(g)}</option>`).join('');
   $('#d-a').innerHTML = opts; $('#d-b').innerHTML = opts; if (r.groups.length > 1) $('#d-a').selectedIndex = r.groups.length - 1;
@@ -231,6 +232,7 @@ function drawRank() {
 }
 function drawQc() {
   const q = S.qc; if (!q) return;
+  if (window.renderQuantQc) renderQuantQc();
   $('#qc-read').innerHTML = ro('proteins kept', q.n_proteins.toLocaleString()) + ro('samples', q.samples.length) + ro('missing after filter', q.missing_total_pct.toFixed(1) + '%') +
     ro('median CV', Object.values(q.cv).length ? (Object.values(q.cv).reduce((a, b) => a + b.median, 0) / Object.values(q.cv).length).toFixed(1) + '%' : '–');
   const np = q.pca.explained.length, pairs = []; for (let i = 0; i < np; i++) for (let j = i + 1; j < np; j++) pairs.push([i, j]);
@@ -353,7 +355,7 @@ $('#en-run').onclick = e => busy(e.target, async () => {
 });
 
 /* ---------- redraw / lifecycle ---------- */
-function redraw(page) { if (page === 'qc') drawQc(); if (page === 'diff') drawDiff(); if (page === 'dbscatter' && window.drawDbScatter) drawDbScatter(); if (page === 'dbcover' && window.drawDbCover) drawDbCover(); }
+function redraw(page) { if (page === 'runs' && window.loadRuns) loadRuns(); if (page === 'export' || page === 'dbexport') window.renderExports && renderExports(); if (page === 'dbspectra') window.renderSpectra && renderSpectra(); if (page === 'dbqc') window.drawDbQc && drawDbQc(); if (page === 'qc') drawQc(); if (page === 'diff') drawDiff(); if (page === 'dbscatter' && window.drawDbScatter) drawDbScatter(); if (page === 'dbcover' && window.drawDbCover) drawDbCover(); }
 let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => redraw(S.page), 120); });
 $('#anim').onchange = e => window.setBackgroundAnimation(e.target.checked);
 $('#quit').onclick = async () => { if (!confirm('Quit Recode Detector?')) return; try { await api('/api/quit', {}); } catch (e) {} document.body.innerHTML = '<p style="padding:40px;color:#8fb5b4;font:16px sans-serif">Recode Detector has quit. You can close this tab.</p>'; };
@@ -366,7 +368,7 @@ if (/[?&]shot=1/.test(location.search)) document.documentElement.classList.add('
   if (S.st.loaded) {
     afterLoad(true);
     if (S.st.analysed) {
-      S.qc = S.st.qc; S.levels = S.st.levels; $('#pr-log').textContent = S.st.log.join('\n');
+      S.qc = S.st.qc; S.checks = S.st.checks; S.sampleQc = S.st.sample_qc; S.levels = S.st.levels; $('#pr-log').textContent = S.st.log.join('\n');
       const opts = S.levels.map(g => `<option>${esc(g)}</option>`).join('');
       $('#d-a').innerHTML = opts; $('#d-b').innerHTML = opts; $('#d-a').selectedIndex = S.levels.length - 1;
     }
@@ -374,7 +376,7 @@ if (/[?&]shot=1/.test(location.search)) document.documentElement.classList.add('
   try { DBS.st = await api('/api/db/state'); if (DBS.st.has_result) DBS.result = DBS.st.result; if (window.afterDbChange) afterDbChange(true); } catch (e) {}
   updateNav();
   const hp = new URLSearchParams(location.hash.slice(1)).get('page');
-  if (hp && reach()[hp]) { S.mode = hp.startsWith('db') ? 'db' : 'quant'; updateNav(); show(hp); if (new URLSearchParams(location.hash.slice(1)).get('open')) setTimeout(() => { const r = document.querySelector('#t-db tbody tr'); if (r) r.click(); }, 300); }
+  if (hp && reach()[hp]) { S.mode = hp.startsWith('db') ? 'db' : 'quant'; updateNav(); show(hp); const sc = new URLSearchParams(location.hash.slice(1)).get('scroll'); if (sc) setTimeout(() => { const el = document.getElementById(sc); if (el) { el.scrollIntoView({ block: 'start' }); scrollBy(0, -100); } }, 900); if (new URLSearchParams(location.hash.slice(1)).get('open')) setTimeout(() => { const r = document.querySelector('#t-db tbody tr'); if (r) r.click(); }, 300); }
 })();
 
 window.onLookChange = () => { syncColors(); redraw(S.page); if (window.restartBackground) restartBackground(); };

@@ -18,15 +18,30 @@ It starts after the search engine. Use MaxQuant, DIA-NN, Spectronaut or similar 
 | **Enrichment** | Over-representation (hypergeometric) of significant proteins in gene sets from a `.gmt` file you provide, against the proteins quantified in the comparison as background. |
 | **Export** | Results CSV, processed matrix CSV, and a JSON file with the groups, parameters and processing steps for your methods section. |
 
+## What's in the program
+
+- **Saved runs:** every analysis is stored and can be reopened later (Runs page); results are recomputed from the saved inputs.
+- **Spectrum check from raw data:** goes back to the `.raw` (or mzML) file to see the actual MS/MS evidence for a peptide.
+- **QC** for both modes, **per-table export** (CSV, TSV, Excel) and a **ZIP of everything**.
+- **Ten looks** (header menu), a plain-English **PDF report**, and a **Mac app**.
+
 ## Database check mode
 
 A second mode (switch at the top of the page) for a different question: the same data were searched against a reference protein database and an alternative one, for example a genome translated with a codon read differently (CGG as Trp instead of Arg, an alternative start site, a point-mutation set). **Which version of each protein did the search actually see?**
 
 You load the peptide report (DIA-NN `report.pr_matrix.tsv`), the reference FASTA, and, optionally, the alternative FASTA. If one FASTA holds both standard and variant proteins, give the text that marks the variant IDs. The program pairs each variant with its reference protein, finds every position where they differ, and lists the identified peptides that span that position. Only such a peptide can tell the two versions apart. Peptides that also occur elsewhere in the database are shown as ambiguous and not counted. A report from a search against the standard database alone can be added for comparison.
 
+A **Spectra** page goes back to the raw data. Point it at the run's Thermo `.raw` file (it is read in place, nothing is converted; this needs ThermoRawFileParser, which MassSpec Bench installs, or set `RD_THERMO_PARSER`) or at an mzML file. For each peptide with evidence at a changed position, and for its counterpart with the other residue, the program finds the precursor in the survey scans, takes the fragmentation scans at its elution peak, and matches b and y ions. The verdict rests on fragments that contain the changed residue, because fragments from the unchanged part are shared by both versions. The chance of the match arising by accident is corrected for choosing the best of many scans and compared with 20 shuffled decoy peptides of the same mass. Annotated spectra, the chromatogram of the intact peptide and the co-elution of fragment ions are shown for both versions side by side. You can also check any peptide sequence by hand.
+
+A **Sites** detail also tells you whether each version could have been detected at all (peptide length after trypsin), which explains many "no coverage" positions.
+
 A **Coverage** page reports how much of the reference proteome the run saw: proteins detected, how many with two or more peptides, the share of all amino acids covered, detection by protein size, and a per-protein table. The **Report** page downloads a **PDF written in plain English** (summary, what was measured, coverage, the question, results, caveats, next steps, glossary, methods) and CSVs of sites, peptides and coverage.
 
 Each site gets a verdict: *alternative seen*, *reference seen*, *both seen*, or *no coverage*. Treat a verdict as a lead to check against the spectra, not as proof: it is only as reliable as the search's own false-discovery control, and a single peptide is thin evidence. *No coverage* is not evidence against either version.
+
+## Saved runs and exports
+
+Runs are stored in `~/Library/Application Support/RecodeDetector/runs` (macOS) or `~/.recode_detector/runs`; set `RD_HOME` to change the parent folder. Each table in the program has CSV and Excel buttons, and the export page offers every table in CSV, TSV or Excel plus a ZIP.
 
 ## Run it
 
