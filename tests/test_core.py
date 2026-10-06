@@ -136,3 +136,22 @@ def test_qc_and_heatmap(sim):
     ids = list(p.log_imp.index[:30])
     h = pipeline.heatmap(p, ids)
     assert len(h["z"]) == 30 and len(h["z"][0]) == 8
+
+
+def test_diann_precursor_matrix_is_rejected_with_advice():
+    d = pd.DataFrame({"Protein.Group": ["P1", "P2"], "Protein.Ids": ["P1", "P2"], "Protein.Names": ["a", "b"],
+                      "Genes": ["G1", "G2"], "First.Protein.Description": ["x", "y"], "Proteotypic": [1, 1],
+                      "Stripped.Sequence": ["AAK", "BBK"], "Modified.Sequence": ["AAK", "BBK"],
+                      "Precursor.Charge": [2, 3], "Precursor.Id": ["AAK2", "BBK3"], "run1": [1e5, 2e5]})
+    with pytest.raises(ValueError, match="pg_matrix"):
+        loaders.load(d.to_csv(sep="\t", index=False).encode(), "report.pr_matrix.tsv")
+
+
+def test_diann_metadata_columns_are_not_samples_and_single_run_explains():
+    d = pd.DataFrame({"Protein.Group": ["P1", "P2", "P3"], "Protein.Names": ["a", "b", "c"], "Genes": ["G1", "G2", "G3"],
+                      "First.Protein.Description": ["x", "y", "z"], "Proteotypic": [1, 1, 1], "run1": [1e5, 2e5, 3e5]})
+    with pytest.raises(ValueError, match="replicate"):
+        loaders.load(d.to_csv(sep="\t", index=False).encode(), "report.pg_matrix.tsv")
+    d["run2"] = [1.1e5, 2e5, 2.9e5]
+    ds = loaders.load(d.to_csv(sep="\t", index=False).encode(), "report.pg_matrix.tsv")
+    assert ds.samples == ["run1", "run2"]

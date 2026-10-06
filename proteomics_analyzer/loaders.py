@@ -11,8 +11,10 @@ import pandas as pd
 
 DIANN_META = {
     "protein.group", "protein.ids", "protein.names", "genes", "first.protein.description",
-    "n.sequences", "n.proteotypic.sequences",
+    "n.sequences", "n.proteotypic.sequences", "proteotypic", "precursor.charge", "precursor.id",
+    "stripped.sequence", "modified.sequence", "protein.q.value", "pg.q.value",
 }
+DIANN_PRECURSOR_MARKERS = {"precursor.id", "modified.sequence", "stripped.sequence", "precursor.charge"}
 GENE_NAMES = ("gene names", "gene name", "genes", "gene", "gene symbol", "symbol", "pg.genes")
 ID_NAMES = ("majority protein ids", "protein ids", "protein.group", "protein group", "protein",
             "accession", "uniprot", "pg.proteingroups", "protein id", "id")
@@ -120,6 +122,10 @@ def load(raw: bytes, filename: str, intensity_kind: str | None = None) -> Datase
         ids = df[id_col].map(_first_token)
         genes = df[gene_col].map(_first_token) if gene_col else ids
     elif fmt == "diann":
+        if DIANN_PRECURSOR_MARKERS & {c.lower() for c in df.columns}:
+            raise ValueError(
+                "This looks like DIA-NN's precursor matrix (pr_matrix: one row per peptide ion). This program "
+                "works on protein-level tables: load the protein group matrix (report.pg_matrix.tsv) instead.")
         sample_cols = [c for c in df.columns if c.lower() not in DIANN_META
                        and _num(df[c]).notna().mean() > 0.2]
         notes.append(f"DIA-NN protein group matrix ({len(sample_cols)} runs).")
@@ -140,7 +146,10 @@ def load(raw: bytes, filename: str, intensity_kind: str | None = None) -> Datase
         genes = df[gene_col].map(_first_token) if gene_col else ids
 
     if len(sample_cols) < 2:
-        raise ValueError("Fewer than two sample columns were found.")
+        raise ValueError(
+            f"Only {len(sample_cols)} sample column found"
+            f"{' (' + clean_sample_name(sample_cols[0]) + ')' if sample_cols else ''}. Comparing groups needs "
+            "replicate runs: process several runs together and load the combined protein table.")
 
     mat = pd.DataFrame({c: _num(df[c]) for c in sample_cols})
     mat = mat.where(mat > 0)                       # 0 means "not quantified"
