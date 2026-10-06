@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Proteomics Analyzer</title>
+<title>Recode Detector</title>
 <link rel="icon" href="icon.svg" type="image/svg+xml">
+<script>try{var m={ultraviolet:'#0b0720',solar:'#130905',paper:'#f7f1e5',synthwave:'#0a0614',forest:'#06130d',mono:'#000',rose:'#fff3f8',copper:'#0e0e11',skylab:'#f4f9ff',sunset:'#1b0b33'};var q=new URLSearchParams(location.search).get('look')||localStorage.getItem('rd-look')||'paper';document.documentElement.style.background=m[q]||m.paper}catch(e){}</script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,7 +15,7 @@
 <header id="top">
   <div class="brand">
     <svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><use href="icon.svg#mark"/></svg>
-    <div><div class="kicker">LC–MS/MS · protein level</div><h1>Proteomics Analyzer</h1></div>
+    <div><div class="kicker">proteomics · genetic recoding</div><h1>Recode Detector</h1></div>
   </div>
   <div class="mode" id="mode" role="tablist" aria-label="Mode">
     <button data-mode="quant" class="on">Quantification</button><button data-mode="db">Database check</button>
@@ -34,6 +35,7 @@
     <button data-mode="db" data-page="dbexport" hidden><i>05</i>Report</button>
   </nav>
   <div class="tools">
+    <select id="look" title="Look" aria-label="Look"></select>
     <label class="sw" title="Animated background"><input type="checkbox" id="anim" checked><span></span>Animation</label>
     <button id="quit" class="ghost" title="Stop the program">Quit</button>
   </div>
@@ -253,7 +255,8 @@
     </div>
   </section>
 </main>
-<footer>Proteomics Analyzer <span id="ver"></span> · runs entirely on this computer</footer>
+<footer>Recode Detector <span id="ver"></span> · runs entirely on this computer</footer>
+<script src="themes.js"></script>
 <script src="bg.js"></script>
 <script src="app.js"></script>
 <script src="dbcompare.js"></script>

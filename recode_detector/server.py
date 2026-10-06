@@ -290,7 +290,7 @@ LIFE: Lifecycle | None = None
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "ProteomicsAnalyzer"
+    server_version = "RecodeDetector"
     protocol_version = "HTTP/1.1"
 
     def log_message(self, *a):
@@ -428,7 +428,7 @@ def serve(port: int = DEFAULT_PORT, open_browser: bool = True) -> None:
     LIFE = Lifecycle(on_quit=quit_)
     LIFE.watch()
     url = f"http://localhost:{port}"
-    print(f"Proteomics Analyzer {__version__} at {url}", flush=True)
+    print(f"Recode Detector {__version__} at {url}", flush=True)
     if open_browser:
         import webbrowser
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
@@ -440,8 +440,8 @@ def serve(port: int = DEFAULT_PORT, open_browser: bool = True) -> None:
 
 def main() -> None:
     import argparse
-    ap = argparse.ArgumentParser(prog="proteomics-analyzer", description="Proteomics Analyzer local app")
-    ap.add_argument("--port", type=int, default=int(os.environ.get("PA_PORT", DEFAULT_PORT)))
+    ap = argparse.ArgumentParser(prog="recode-detector", description="Recode Detector local app")
+    ap.add_argument("--port", type=int, default=int(os.environ.get("RD_PORT", DEFAULT_PORT)))
     ap.add_argument("--no-browser", action="store_true")
     a = ap.parse_args()
     serve(a.port, not a.no_browser)

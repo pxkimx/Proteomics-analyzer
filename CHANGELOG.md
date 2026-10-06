@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.0
+Renamed from Proteomics Analyzer to **Recode Detector**. New look: "Paper Lab" (cream paper, ink blue and vermilion, serif headings, an animated ridge-line plot) is the default; nine other looks (Ultraviolet, Solar Flare, Neon Grid, Mycelium, Black Box, Rose Quartz, Copper Helix, Sky Lab, Spectrum Sunset) are in the "Look" menu in the header. The Python package is now `recode_detector`, the port variable `RD_PORT`, the Mac app `Recode Detector.app`.
+
 ## 0.3.1
 The PDF report always has a section on the standard-database search: a figure, a table of positions and a plain-English reading when a standard-search report is loaded, and a "not included" note with instructions when it is not.
 

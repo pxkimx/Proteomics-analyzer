@@ -26,7 +26,7 @@ class Lifecycle:
         self.lock = threading.Lock()
         self.stopping = False
         self.on_quit = on_quit or (lambda: os._exit(0))
-        self.parent = int(os.environ.get("PA_PARENT_PID", "0") or 0)
+        self.parent = int(os.environ.get("RD_PARENT_PID", "0") or 0)
 
     def window_opened(self) -> None:
         with self.lock:

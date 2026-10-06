@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from proteomics_analyzer import dbcompare as d
-from proteomics_analyzer.example import simulate_db
+from recode_detector import dbcompare as d
+from recode_detector.example import simulate_db
 
 
 @pytest.fixture(scope="module")
@@ -88,9 +88,9 @@ def test_peptide_report_errors():
 def test_http_flow():
     import os, subprocess, sys, time, urllib.request
     port = 8776
-    env = dict(os.environ, PA_PARENT_PID=str(os.getpid()))
+    env = dict(os.environ, RD_PARENT_PID=str(os.getpid()))
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    p = subprocess.Popen([sys.executable, "-m", "proteomics_analyzer.server", "--port", str(port), "--no-browser"],
+    p = subprocess.Popen([sys.executable, "-m", "recode_detector.server", "--port", str(port), "--no-browser"],
                          cwd=root, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     base = f"http://127.0.0.1:{port}"
 
@@ -162,7 +162,7 @@ def test_coverage_numbers(sim):
 
 def test_pdf_report(sim):
     pytest.importorskip("reportlab")
-    from proteomics_analyzer import report
+    from recode_detector import report
     pdf = report.build_pdf(run(sim), {"report": "r.tsv", "fasta_ref": "ref.fasta", "fasta_alt": "alt.fasta"})
     assert pdf.startswith(b"%PDF") and len(pdf) > 8000
     pymupdf = pytest.importorskip("pymupdf")
@@ -174,7 +174,7 @@ def test_pdf_report(sim):
 
 def test_pdf_without_standard_search_and_verdict_wording(sim):
     pytest.importorskip("reportlab")
-    from proteomics_analyzer import report
+    from recode_detector import report
     assert "consistent with the alternative" in report._verdict_sentence({"alternative": 6, "reference": 0, "both": 0, "none": 33}, "R", "W")
     assert "No position could be judged" in report._verdict_sentence({"alternative": 0, "reference": 0, "both": 0, "none": 5}, "R", "W")
     assert "mixed" in report._verdict_sentence({"alternative": 2, "reference": 1, "both": 0, "none": 5}, "R", "W")
@@ -184,7 +184,7 @@ def test_pdf_without_standard_search_and_verdict_wording(sim):
 def test_pdf_standard_search_section_both_ways(sim):
     pytest.importorskip("reportlab")
     pymupdf = pytest.importorskip("pymupdf")
-    from proteomics_analyzer import report
+    from recode_detector import report
 
     def text(pdf):
         return " ".join(" ".join(p.get_text() for p in pymupdf.open(stream=pdf, filetype="pdf")).split())

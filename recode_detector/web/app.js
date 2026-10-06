@@ -1,10 +1,14 @@
-/* Proteomics Analyzer front end. No dependencies; plots are drawn on canvases. */
+/* Recode Detector front end. No dependencies; plots are drawn on canvases. */
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const S = { mode: 'quant', last: { quant: 'data', db: 'dbfiles' }, st: null, qc: null, comp: null, sel: null, boxWhich: 'raw', pc: [0, 1], gmt: '', sort: { k: 'p_value', dir: 1 }, hover: null };
 const DBS = { st: null, result: null };
-const PAL = ['#2dd4bf', '#fbbf24', '#38bdf8', '#f472b6', '#a3e635', '#c084fc', '#fb923c', '#94a3b8'];
-const INK = '#cfe9e6', MUTE = '#7fa6a5', GRID = 'rgba(94,234,212,.12)';
+let PAL, INK, MUTE, GRID;
+function syncColors() { PAL = TH.pal; INK = TH.ink; MUTE = TH.mute; GRID = TH.grid; }
+syncColors();
+const lerp3 = (stops, t) => { t = Math.max(0, Math.min(1, t)) * (stops.length - 1); const i = Math.min(stops.length - 2, Math.floor(t)), f = t - i; return `rgb(${stops[i].map((v, j) => Math.round(v + (stops[i + 1][j] - v) * f)).join(',')})`; };
+const heatCol = t => lerp3(TH.heat, t);                                                  // low -> high
+const divCol = z => z >= 0 ? lerp3([TH.div[0], TH.div[1]], z) : lerp3([TH.div[0], TH.div[2]], -z);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 const fmt = (v, d = 2) => v == null ? '–' : (Math.abs(v) < 0.001 && v !== 0 ? v.toExponential(1) : (+v).toFixed(d));
 
@@ -142,7 +146,7 @@ function frame(canvas, { xr, yr, box = [54, 12, 14, 38], xl, yl, noX, noY } = {}
   if (!noY) for (const v of ticks(...yr, 5)) { c.beginPath(); c.moveTo(L, Y(v)); c.lineTo(w - R, Y(v)); c.stroke(); c.fillText(+v.toFixed(2), L - 6, Y(v)); }
   c.textAlign = 'center'; c.textBaseline = 'top';
   if (!noX) for (const v of ticks(...xr, 7)) { c.beginPath(); c.moveTo(X(v), T); c.lineTo(X(v), h - B); c.stroke(); c.fillText(+v.toFixed(2), X(v), h - B + 5); }
-  c.strokeStyle = 'rgba(94,234,212,.35)'; c.strokeRect(L, T, w - L - R, h - T - B);
+  c.strokeStyle = TH.border; c.strokeRect(L, T, w - L - R, h - T - B);
   c.fillStyle = INK;
   if (xl) { c.textAlign = 'center'; c.fillText(xl, (L + w - R) / 2, h - 15); }
   if (yl) { c.save(); c.translate(13, (T + h - B) / 2); c.rotate(-Math.PI / 2); c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(yl, 0, 0); c.restore(); }
@@ -189,7 +193,7 @@ function drawPca() {
   q.samples.forEach((s, i) => {
     const g = q.per_sample[i].group, x = fr.X(xs[i]), y = fr.Y(ys[i]);
     fr.c.fillStyle = gcolor(g); fr.c.beginPath(); fr.c.arc(x, y, 6.5, 0, 6.3); fr.c.fill();
-    fr.c.strokeStyle = '#04161b'; fr.c.lineWidth = 1.5; fr.c.stroke();
+    fr.c.strokeStyle = TH.bg1; fr.c.lineWidth = 1.5; fr.c.stroke();
     fr.c.fillStyle = INK; fr.c.textAlign = 'left'; fr.c.textBaseline = 'middle'; fr.c.fillText(s, x + 10, y);
   });
   let lx = fr.L + 10; levels().forEach(g => { fr.c.fillStyle = gcolor(g); fr.c.fillRect(lx, fr.T + 8, 10, 10); fr.c.fillStyle = INK; fr.c.textAlign = 'left'; fr.c.fillText(g, lx + 15, fr.T + 14); lx += 30 + g.length * 7; });
@@ -201,13 +205,13 @@ function drawCorr() {
   lo = Math.min(lo, .99);
   ord.forEach((si, r) => ord.forEach((sj, k) => {
     const v = M[si][sj], t = (v - lo) / (1 - lo);
-    c.fillStyle = `rgb(${Math.round(8 + t * 40)},${Math.round(40 + t * 172)},${Math.round(55 + t * 150)})`; c.fillRect(L + k * cell, T + r * cell, cell - 1, cell - 1);
-    if (cell >= 34) { c.fillStyle = t > .55 ? '#032a2a' : INK; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(v.toFixed(2), L + (k + .5) * cell, T + (r + .5) * cell); }
+    c.fillStyle = heatCol(t); c.fillRect(L + k * cell, T + r * cell, cell - 1, cell - 1);
+    if (cell >= 34) { c.fillStyle = t > .55 ? TH.bg1 : INK; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(v.toFixed(2), L + (k + .5) * cell, T + (r + .5) * cell); }
   }));
   c.fillStyle = MUTE; c.textBaseline = 'middle'; c.textAlign = 'right';
   ord.forEach((si, r) => c.fillText(wrapText(c, q.samples[si], L - 8), L - 6, T + (r + .5) * cell));
   ord.forEach((si, k) => { c.save(); c.translate(L + (k + .5) * cell, T + size + 8); c.rotate(Math.PI / 3); c.textAlign = 'left'; c.fillText(wrapText(c, q.samples[si], 80), 0, 0); c.restore(); });
-  const gx = L + size + 18; for (let i = 0; i < 60; i++) { const t = 1 - i / 59; c.fillStyle = `rgb(${Math.round(8 + t * 40)},${Math.round(40 + t * 172)},${Math.round(55 + t * 150)})`; c.fillRect(gx, T + i * size / 60, 12, size / 60 + 1); }
+  const gx = L + size + 18; for (let i = 0; i < 60; i++) { const t = 1 - i / 59; c.fillStyle = heatCol(t); c.fillRect(gx, T + i * size / 60, 12, size / 60 + 1); }
   c.fillStyle = MUTE; c.textAlign = 'left'; c.fillText('1.00', gx + 17, T + 5); c.fillText(lo.toFixed(2), gx + 17, T + size - 5);
 }
 function drawCv() {
@@ -223,7 +227,7 @@ function drawCv() {
 }
 function drawRank() {
   const q = S.qc, r = q.rank, fr = frame($('#c-rank'), { xr: [0, r.length * q.rank_step], yr: ext(r, .05), xl: 'protein rank', yl: 'mean log2' });
-  fr.c.strokeStyle = '#2dd4bf'; fr.c.lineWidth = 2; fr.c.beginPath(); r.forEach((v, i) => { const x = fr.X(i * q.rank_step), y = fr.Y(v); i ? fr.c.lineTo(x, y) : fr.c.moveTo(x, y); }); fr.c.stroke();
+  fr.c.strokeStyle = TH.a; fr.c.lineWidth = 2; fr.c.beginPath(); r.forEach((v, i) => { const x = fr.X(i * q.rank_step), y = fr.Y(v); i ? fr.c.lineTo(x, y) : fr.c.moveTo(x, y); }); fr.c.stroke();
 }
 function drawQc() {
   const q = S.qc; if (!q) return;
@@ -238,7 +242,7 @@ $('#pcsel').onchange = () => drawQc();
 $('#boxwhich').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S.boxWhich = b.dataset.w; $$('#boxwhich button').forEach(x => x.classList.toggle('on', x === b)); drawBox(); });
 
 /* ---------- 05 differential ---------- */
-const colorOf = call => call === 'up' ? '#fb923c' : call === 'down' ? '#38bdf8' : 'rgba(143,181,180,.38)';
+const colorOf = call => call === 'up' ? TH.up : call === 'down' ? TH.down : TH.ns;
 function runComparison(btn) {
   return busy(btn, async () => {
     const a = $('#d-a').value, b = $('#d-b').value; if (a === b) throw new Error('Pick two different groups.');
@@ -261,7 +265,7 @@ function drawVolcano() {
   const pts = S.vp = volcanoPts(), m = S.comp.meta, cvs = $('#c-volc');
   const xm = Math.max(1.5, ...pts.map(p => Math.abs(p.x))) * 1.05, fr = S.vf = frame(cvs, { xr: [-xm, xm], yr: [0, Math.max(2, ...pts.map(p => p.y)) * 1.06], xl: `log2 fold change   (← higher in ${m.b}   |   higher in ${m.a} →)`, yl: '−log10 p' });
   const c = fr.c;
-  c.strokeStyle = 'rgba(251,191,36,.45)'; c.setLineDash([5, 5]); [-m.lfc, m.lfc].forEach(v => { c.beginPath(); c.moveTo(fr.X(v), fr.T); c.lineTo(fr.X(v), fr.h - fr.B); c.stroke(); });
+  c.strokeStyle = TH.cAlpha; c.setLineDash([5, 5]); [-m.lfc, m.lfc].forEach(v => { c.beginPath(); c.moveTo(fr.X(v), fr.T); c.lineTo(fr.X(v), fr.h - fr.B); c.stroke(); });
   const sigP = pts.filter(p => p.r.call !== 'ns').map(p => p.y); if (sigP.length) { const yv = Math.min(...sigP); c.beginPath(); c.moveTo(fr.L, fr.Y(yv)); c.lineTo(fr.w - fr.R, fr.Y(yv)); c.stroke(); } c.setLineDash([]);
   for (const pass of ['ns', 'sig']) for (const p of pts) {
     if ((p.r.call === 'ns') !== (pass === 'ns')) continue;
@@ -277,7 +281,7 @@ function drawVolcano() {
   }
   if (S.sel) { const p = pts.find(q => q.r.protein === S.sel); if (p) { c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.arc(fr.X(p.x), fr.Y(p.y), 8, 0, 6.3); c.stroke(); } }
   const f = $('#d-find').value.trim().toUpperCase();
-  if (f) for (const p of pts) if ((p.r.gene || '').toUpperCase() === f || p.r.protein.toUpperCase() === f) { c.strokeStyle = '#fbbf24'; c.lineWidth = 2.5; c.beginPath(); c.arc(fr.X(p.x), fr.Y(p.y), 9, 0, 6.3); c.stroke(); }
+  if (f) for (const p of pts) if ((p.r.gene || '').toUpperCase() === f || p.r.protein.toUpperCase() === f) { c.strokeStyle = TH.c; c.lineWidth = 2.5; c.beginPath(); c.arc(fr.X(p.x), fr.Y(p.y), 9, 0, 6.3); c.stroke(); }
 }
 function nearest(e) {
   const cv = $('#c-volc'), b = cv.getBoundingClientRect(), mx = e.clientX - b.left, my = e.clientY - b.top; let best = null, bd = 144;
@@ -320,7 +324,7 @@ function drawHeat() {
   h.col_order.forEach((ci, k) => { c.fillStyle = gcolor(h.groups[ci]); c.fillRect(L + k * cw, 4, cw - 1, 10); });
   h.row_order.forEach((ri, r) => h.col_order.forEach((ci, k) => {
     const z = Math.max(-2, Math.min(2, h.z[ri][ci])) / 2, t = Math.abs(z);
-    c.fillStyle = z >= 0 ? `rgb(${Math.round(12 + t * 239)},${Math.round(50 + t * 100)},${Math.round(58 - t * 20)})` : `rgb(${Math.round(12 + t * 44)},${Math.round(50 + t * 115)},${Math.round(58 + t * 190)})`;
+    c.fillStyle = divCol(z);
     c.fillRect(L + k * cw, T + r * rh, cw - 1, rh - (rh >= 8 ? 1 : 0));
   }));
   if (showL) { c.fillStyle = INK; c.textAlign = 'left'; c.textBaseline = 'middle'; h.row_order.forEach((ri, r) => c.fillText(wrapText(c, h.labels[ri], R - 10), w - R + 6, T + (r + .5) * rh)); }
@@ -352,11 +356,11 @@ $('#en-run').onclick = e => busy(e.target, async () => {
 function redraw(page) { if (page === 'qc') drawQc(); if (page === 'diff') drawDiff(); if (page === 'dbscatter' && window.drawDbScatter) drawDbScatter(); if (page === 'dbcover' && window.drawDbCover) drawDbCover(); }
 let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => redraw(S.page), 120); });
 $('#anim').onchange = e => window.setBackgroundAnimation(e.target.checked);
-$('#quit').onclick = async () => { if (!confirm('Quit Proteomics Analyzer?')) return; try { await api('/api/quit', {}); } catch (e) {} document.body.innerHTML = '<p style="padding:40px;color:#8fb5b4;font:16px sans-serif">Proteomics Analyzer has quit. You can close this tab.</p>'; };
+$('#quit').onclick = async () => { if (!confirm('Quit Recode Detector?')) return; try { await api('/api/quit', {}); } catch (e) {} document.body.innerHTML = '<p style="padding:40px;color:#8fb5b4;font:16px sans-serif">Recode Detector has quit. You can close this tab.</p>'; };
 
 // Holding this stream open is how the server knows a window is open; closing the tab drops it.
 function holdWindow() { const es = new EventSource('/api/window'); es.onerror = () => { es.close(); setTimeout(holdWindow, 1500); }; }
-holdWindow();
+if (/[?&]shot=1/.test(location.search)) document.documentElement.classList.add('shot'); else holdWindow();       // ?shot=1: screenshots without holding the program open
 (async () => {
   S.st = await api('/api/state'); $('#ver').textContent = 'v' + S.st.version;
   if (S.st.loaded) {
@@ -369,4 +373,8 @@ holdWindow();
   }
   try { DBS.st = await api('/api/db/state'); if (DBS.st.has_result) DBS.result = DBS.st.result; if (window.afterDbChange) afterDbChange(true); } catch (e) {}
   updateNav();
+  const hp = new URLSearchParams(location.hash.slice(1)).get('page');
+  if (hp && reach()[hp]) { S.mode = hp.startsWith('db') ? 'db' : 'quant'; updateNav(); show(hp); if (new URLSearchParams(location.hash.slice(1)).get('open')) setTimeout(() => { const r = document.querySelector('#t-db tbody tr'); if (r) r.click(); }, 300); }
 })();
+
+window.onLookChange = () => { syncColors(); redraw(S.page); if (window.restartBackground) restartBackground(); };

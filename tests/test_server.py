@@ -34,8 +34,8 @@ def wait_up():
 
 @pytest.fixture()
 def server():
-    env = dict(os.environ, PA_PARENT_PID=str(os.getpid()))
-    p = subprocess.Popen([sys.executable, "-m", "proteomics_analyzer.server", "--port", str(PORT), "--no-browser"],
+    env = dict(os.environ, RD_PARENT_PID=str(os.getpid()))
+    p = subprocess.Popen([sys.executable, "-m", "recode_detector.server", "--port", str(PORT), "--no-browser"],
                          cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     assert wait_up()
     yield p
@@ -67,8 +67,8 @@ def test_full_workflow_over_http(server):
     code, body = call("/api/enrich", {"gmt": gmt, "direction": "both"})
     assert code == 200 and json.loads(body)["rows"][0]["set"] == "S1"
     # the page itself and path traversal
-    assert call("/")[0] == 200 and b"Proteomics Analyzer" in call("/")[1]
-    assert call("/../proteomics_analyzer/server.py")[0] == 404
+    assert call("/")[0] == 200 and b"Recode Detector" in call("/")[1]
+    assert call("/../recode_detector/server.py")[0] == 404
 
 
 def test_bad_uploads_give_clear_errors(server):
@@ -95,8 +95,8 @@ def test_quits_when_window_closes(server):
 
 def test_quits_when_launcher_dies():
     launcher = subprocess.Popen(["sleep", "60"])
-    env = dict(os.environ, PA_PARENT_PID=str(launcher.pid))
-    p = subprocess.Popen([sys.executable, "-m", "proteomics_analyzer.server", "--port", str(PORT), "--no-browser"],
+    env = dict(os.environ, RD_PARENT_PID=str(launcher.pid))
+    p = subprocess.Popen([sys.executable, "-m", "recode_detector.server", "--port", str(PORT), "--no-browser"],
                          cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         assert wait_up()

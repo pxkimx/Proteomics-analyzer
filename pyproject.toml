@@ -3,7 +3,7 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "proteomics-analyzer"
+name = "recode-detector"
 dynamic = ["version"]
 description = "Local, offline protein-level proteomics analysis: QC, normalisation, imputation, differential abundance, enrichment."
 readme = "README.md"
@@ -15,16 +15,16 @@ dependencies = ["numpy>=1.24", "pandas>=2.0", "scipy>=1.10", "openpyxl>=3.1", "r
 test = ["pytest"]
 
 [project.scripts]
-proteomics-analyzer = "proteomics_analyzer.server:main"
+recode-detector = "recode_detector.server:main"
 
 [tool.setuptools.dynamic]
-version = { attr = "proteomics_analyzer.__version__" }
+version = { attr = "recode_detector.__version__" }
 
 [tool.setuptools.packages.find]
-include = ["proteomics_analyzer*"]
+include = ["recode_detector*"]
 
 [tool.setuptools.package-data]
-proteomics_analyzer = ["web/*"]
+recode_detector = ["web/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

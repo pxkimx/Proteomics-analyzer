@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from proteomics_analyzer import loaders, pipeline, stats
-from proteomics_analyzer.example import simulate
+from recode_detector import loaders, pipeline, stats
+from recode_detector.example import simulate
 
 
 @pytest.fixture(scope="module")

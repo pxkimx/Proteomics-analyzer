@@ -1,6 +1,8 @@
-# Proteomics Analyzer
+# Recode Detector
 
-A local, offline program for the protein-level part of a proteomics experiment: load a quantification table, check its quality, normalise, impute, find differentially abundant proteins, and test gene-set enrichment. It runs on your own computer; nothing is uploaded anywhere.
+*(formerly Proteomics Analyzer)*
+
+A local, offline program for proteomics. Its headline job is to **detect genetic recoding**: when the same data are searched against a standard protein database and an alternative one (for example a codon read as a different amino acid), it shows which version of each protein the data support, with coverage statistics and a plain-English PDF report. It also does the protein-level part of an ordinary quantitative experiment: load a quantification table, check its quality, normalise, impute, find differentially abundant proteins, and test gene-set enrichment. It runs on your own computer; nothing is uploaded anywhere.
 
 It starts after the search engine. Use MaxQuant, DIA-NN, Spectronaut or similar to identify and quantify proteins, then bring the protein table here.
 
@@ -31,16 +33,16 @@ Each site gets a verdict: *alternative seen*, *reference seen*, *both seen*, or 
 Needs Python 3.9 or newer.
 
 ```bash
-git clone https://github.com/<you>/Proteomics-analyzer.git
-cd Proteomics-analyzer
+git clone https://github.com/<you>/Recode-Detector.git
+cd Recode-Detector
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python -m proteomics_analyzer          # opens http://localhost:8775
+python -m recode_detector          # opens http://localhost:8775
 ```
 
 Closing the browser tab stops the program. (A page reload does not.)
 
-**macOS app:** `macos/build_app.sh` builds a double-clickable `Proteomics Analyzer.app` with an icon. On first start it creates its own Python environment under `~/Library/Application Support/ProteomicsAnalyzer`. The app carries its own copy of the code, so rebuild it after you change the code.
+**macOS app:** `macos/build_app.sh` builds a double-clickable `Recode Detector.app` with an icon. On first start it creates its own Python environment under `~/Library/Application Support/RecodeDetector`. The app carries its own copy of the code, so rebuild it after you change the code.
 
 No data of your own yet? Use **Load simulated example** on the first page: a MaxQuant-style table with 3,000 invented proteins, two groups of four runs, left-censored missing values and flagged contaminants. It is simulated, not real biology, and the true changes are known, which the test suite uses.
 

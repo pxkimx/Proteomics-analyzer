@@ -107,8 +107,8 @@ function drawDbScatter() {
   if (sc.a.length) {
     const lo = Math.min(...sc.a, ...sc.b) - .5, hi = Math.max(...sc.a, ...sc.b) + .5;
     const fr = frame(cvs, { xr: [lo, hi], yr: [lo, hi], xl: 'main search (with alternative proteins)', yl: 'standard-database search' });
-    fr.c.strokeStyle = 'rgba(251,191,36,.5)'; fr.c.setLineDash([5, 5]); fr.c.beginPath(); fr.c.moveTo(fr.X(lo), fr.Y(lo)); fr.c.lineTo(fr.X(hi), fr.Y(hi)); fr.c.stroke(); fr.c.setLineDash([]);
-    fr.c.fillStyle = 'rgba(45,212,191,.35)'; sc.a.forEach((x, i) => { fr.c.beginPath(); fr.c.arc(fr.X(x), fr.Y(sc.b[i]), 2.2, 0, 6.3); fr.c.fill(); });
+    fr.c.strokeStyle = TH.cAlpha; fr.c.setLineDash([5, 5]); fr.c.beginPath(); fr.c.moveTo(fr.X(lo), fr.Y(lo)); fr.c.lineTo(fr.X(hi), fr.Y(hi)); fr.c.stroke(); fr.c.setLineDash([]);
+    fr.c.fillStyle = `rgba(${TH.aRGB.join(',')},.42)`; sc.a.forEach((x, i) => { fr.c.beginPath(); fr.c.arc(fr.X(x), fr.Y(sc.b[i]), 2.2, 0, 6.3); fr.c.fill(); });
   }
   const hits = r.sites.filter(s => s.ref_peptides_b.length);
   $('#db-bsites').innerHTML = hits.length ? hits.map(s => `<div style="margin:6px 0"><b>${esc(shortId(s.ref_protein))}</b> position ${s.position} <span class="badge b-${s.status}">${VERDICT[s.status]}</span><br><span class="mono">${esc(s.ref_peptides_b.map(p => p.sequence + (p.seen_in_a ? ' (also main)' : ' (main: absent)')).join(', '))}</span></div>`).join('')
@@ -136,10 +136,10 @@ function drawDbCover() {
   $('#cv-read').innerHTML = ro('proteins detected', `${c.n_detected.toLocaleString()} / ${c.n_proteins.toLocaleString()}`) + ro('detected %', (100 * c.n_detected / c.n_proteins).toFixed(0) + '%') +
     ro('with ≥2 peptides', c.n_ge2.toLocaleString()) + ro('residues covered', c.overall_cov.toFixed(1) + '%') + ro('median coverage', c.median_cov.toFixed(1) + '%') +
     ro('alternative proteins seen', `${c.variant_proteins_detected} / ${c.variant_proteins}`);
-  barChart('c-cv1', c.hist.map((_, i) => i * 10 + '+'), c.hist, '#2dd4bf');
-  barChart('c-cv2', c.by_length.map(b => b.label), c.by_length.map(b => b.n ? 100 * b.detected / b.n : 0), '#38bdf8', v => v.toFixed(0) + '%');
-  const pl = Object.entries(c.pep_lengths); barChart('c-cv3', pl.map(x => x[0]), pl.map(x => x[1]), '#fbbf24');
-  const ch = Object.entries(c.charges); barChart('c-cv4', ch.map(x => x[0] + '+'), ch.map(x => x[1]), '#c4b5fd');
+  barChart('c-cv1', c.hist.map((_, i) => i * 10 + '+'), c.hist, TH.a);
+  barChart('c-cv2', c.by_length.map(b => b.label), c.by_length.map(b => b.n ? 100 * b.detected / b.n : 0), TH.d, v => v.toFixed(0) + '%');
+  const pl = Object.entries(c.pep_lengths); barChart('c-cv3', pl.map(x => x[0]), pl.map(x => x[1]), TH.c);
+  const ch = Object.entries(c.charges); barChart('c-cv4', ch.map(x => x[0] + '+'), ch.map(x => x[1]), TH.b);
   fillCover();
 }
 let cvSort = { k: 'coverage_pct', dir: -1 };

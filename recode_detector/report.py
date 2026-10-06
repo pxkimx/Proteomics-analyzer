@@ -7,11 +7,11 @@ from collections import Counter
 
 from . import __version__
 
-TEAL = "#0f766e"
-AMBER = "#d97706"
-BLUE = "#2563eb"
-GREY = "#64748b"
-LIGHT = "#ecfdf5"
+TEAL = "#1f3a93"
+AMBER = "#d9452b"
+BLUE = "#2f7d6d"
+GREY = "#6d6657"
+LIGHT = "#f8f2e4"
 
 
 def _need_reportlab():
@@ -139,7 +139,7 @@ def build_pdf(res, files: dict, run_date: _dt.date | None = None) -> bytes:
     story += [P("Database comparison report", title),
               P(f"Which version of each protein did this mass spectrometry run see? ({_esc(change_txt)})", ParagraphStyle(
                   "sub", parent=body, fontSize=12.5, leading=16, textColor=colors.HexColor(GREY))),
-              P(f"Prepared {run_date.strftime('%d %B %Y')} with Proteomics Analyzer {__version__}. "
+              P(f"Prepared {run_date.strftime('%d %B %Y')} with Recode Detector {__version__}. "
                 f"Run analysed: {_esc(', '.join(res.samples))}.", small), Spacer(1, 6)]
 
     # ------------------------------------------------------------------ short version
@@ -211,7 +211,7 @@ def build_pdf(res, files: dict, run_date: _dt.date | None = None) -> bytes:
                 "standard one. That is one reason a position can go uncovered.")]
     bars = chart([c["alternative"], c["reference"], c["both"], c["none"]],
                  ["Alternative", "Standard", "Both", "No peptide"], w=300, ylab="Number of positions",
-                 bar_colors=[AMBER, TEAL, "#7c3aed", "#94a3b8"])
+                 bar_colors=[AMBER, TEAL, "#c98a1b", "#a39b8a"])
     story += [KeepTogether(captioned(bars, f"Figure 3. What the run showed at the {summ['n_sites']} changed positions."))]
 
     story += [P("Positions where the run could judge", h2)]
@@ -350,14 +350,14 @@ def build_pdf(res, files: dict, run_date: _dt.date | None = None) -> bytes:
         canvas.saveState()
         canvas.setFont("Helvetica", 8)
         canvas.setFillColor(colors.HexColor(GREY))
-        canvas.drawString(0.8 * inch, 0.5 * inch, f"Proteomics Analyzer {__version__} - database comparison report")
+        canvas.drawString(0.8 * inch, 0.5 * inch, f"Recode Detector {__version__} - database comparison report")
         canvas.drawRightString(letter[0] - 0.8 * inch, 0.5 * inch, f"Page {doc.page}")
         canvas.restoreState()
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=letter, leftMargin=0.8 * inch, rightMargin=0.8 * inch,
                             topMargin=0.75 * inch, bottomMargin=0.8 * inch, title="Database comparison report",
-                            author="Proteomics Analyzer")
+                            author="Recode Detector")
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     return buf.getvalue()
 
