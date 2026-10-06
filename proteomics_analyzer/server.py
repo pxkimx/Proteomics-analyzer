@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 import numpy as np
 import pandas as pd
 
-from . import __version__, dbcompare, loaders, pipeline, stats
+from . import __version__, dbcompare, loaders, pipeline, report, stats
 from .example import example_bytes, simulate_db
 from .lifecycle import Lifecycle
 
@@ -261,19 +261,27 @@ class DbSession:
                                     "they have no reference protein of the same length)." if pairing.unpaired else "."))
             b = self.files["report_b"]["table"] if "report_b" in self.files else None
             self.result = dbcompare.analyse(pairing, self.files["report"]["table"], b)
+            self.marker = marker.strip()
             return self._payload()
 
     def _payload(self) -> dict:
         r = self.result
-        return {"samples": r.samples, "sites": r.sites, "summary": r.summary, "scatter": r.scatter}
+        return {"samples": r.samples, "sites": r.sites, "summary": r.summary, "scatter": r.scatter,
+                "coverage": r.coverage}
 
     def csv(self, which: str) -> tuple[str, bytes]:
         with self.lock:
             if self.result is None:
                 raise ValueError("Run the comparison first.")
-            df = dbcompare.sites_frame(self.result) if which == "db_sites" else dbcompare.peptides_frame(self.result)
-            return ("database_comparison_sites.csv" if which == "db_sites" else "database_comparison_peptides.csv",
-                    df.to_csv(index=False).encode())
+            if which == "db_report":
+                names = {k: v["name"] for k, v in self.files.items()}
+                return "database_comparison_report.pdf", report.build_pdf(self.result, names)
+            frames = {"db_sites": (dbcompare.sites_frame, "sites"), "db_peptides": (dbcompare.peptides_frame, "peptides"),
+                      "db_coverage": (dbcompare.coverage_frame, "coverage")}
+            if which not in frames:
+                raise ValueError("unknown download")
+            fn, label = frames[which]
+            return f"database_comparison_{label}.csv", fn(self.result).to_csv(index=False).encode()
 
 
 SESSION = Session()
@@ -336,7 +344,8 @@ class Handler(BaseHTTPRequestHandler):
                 name, data = DB.csv(which) if which.startswith("db_") else SESSION.csv(which)
             except ValueError as e:
                 return self._json({"error": str(e)}, 400)
-            ctype = "application/json" if name.endswith(".json") else "text/csv"
+            ctype = ("application/json" if name.endswith(".json") else
+                     "application/pdf" if name.endswith(".pdf") else "text/csv")
             return self._send(200, data, ctype, {"Content-Disposition": f'attachment; filename="{name}"'})
         rel = "index.html" if u.path in ("/", "") else u.path.lstrip("/")
         f = (WEB / rel).resolve()

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.0
+Database check mode: a **Coverage** page (proteins detected, sequence coverage, detection by protein size, peptide length and charge, per-protein table) and a **plain-English PDF report** (short version, what was measured, coverage, the question, results table, caveats, next steps, glossary, methods). New dependency: reportlab; the Mac app installs it itself on first start.
+
 ## 0.2.1
 The message shown when a DIA-NN precursor matrix is loaded on the Quantification page now points to Database check mode.
 

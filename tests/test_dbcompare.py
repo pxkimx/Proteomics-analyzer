@@ -117,6 +117,14 @@ def test_http_flow():
         code, body = call("/api/download/db_sites")
         assert code == 200 and body.startswith(b"reference_protein")
         assert call("/api/download/db_peptides")[0] == 200
+        code, body = call("/api/download/db_coverage")
+        assert code == 200 and body.startswith(b"protein,description")
+        code, body = call("/api/download/db_report")
+        try:
+            import reportlab  # noqa: F401
+            assert code == 200 and body.startswith(b"%PDF")
+        except ImportError:
+            assert code == 400 and b"reportlab" in body
         code, body = call("/api/db/load?slot=report&name=x.tsv", raw=b"nonsense")
         assert code == 400 and "error" in json.loads(body)
         code, body = call("/api/db/drop?slot=fasta_ref", {})
@@ -124,3 +132,50 @@ def test_http_flow():
     finally:
         p.terminate()
         p.wait(5)
+
+
+def test_coverage_numbers(sim):
+    res = run(sim)
+    c = res.coverage
+    ref = d.parse_fasta(sim["ref_fasta"])
+    assert c["n_proteins"] == len(ref) and c["n_residues"] == sum(len(v[1]) for v in ref.values())
+    assert 0 < c["n_detected"] <= c["n_proteins"] and c["n_ge2"] <= c["n_detected"]
+    assert sum(c["hist"]) == c["n_detected"] and 0 < c["overall_cov"] < 100
+    assert c["variant_proteins"] == 8 and c["variant_proteins_detected"] == 8
+    assert sum(b["n"] for b in c["by_length"]) == c["n_proteins"]
+    # independent check of one protein
+    tab = d.read_peptides(sim["report"].encode())
+    row = c["proteins"][0]
+    seq = ref[row["protein"]][1]
+    covered = [False] * len(seq)
+    n = 0
+    for pep in tab.peptides:
+        i = seq.find(pep)
+        while i != -1:
+            n += 1
+            for x in range(i, i + len(pep)):
+                covered[x] = True
+            i = seq.find(pep, i + 1)
+    assert row["coverage_pct"] == round(100 * sum(covered) / len(seq), 1)
+    assert d.coverage_frame(res).shape[0] == c["n_proteins"]
+
+
+def test_pdf_report(sim):
+    pytest.importorskip("reportlab")
+    from proteomics_analyzer import report
+    pdf = report.build_pdf(run(sim), {"report": "r.tsv", "fasta_ref": "ref.fasta", "fasta_alt": "alt.fasta"})
+    assert pdf.startswith(b"%PDF") and len(pdf) > 8000
+    pymupdf = pytest.importorskip("pymupdf")
+    doc = pymupdf.open(stream=pdf, filetype="pdf")
+    text = "".join(p.get_text() for p in doc)
+    assert "The short version" in text and "SIM001" in text and "Glossary" in text
+    assert "3 showed only the alternative version" in " ".join(text.split()) or "3 showed only" in text.replace("\n", " ")
+
+
+def test_pdf_without_standard_search_and_verdict_wording(sim):
+    pytest.importorskip("reportlab")
+    from proteomics_analyzer import report
+    assert "consistent with the alternative" in report._verdict_sentence({"alternative": 6, "reference": 0, "both": 0, "none": 33}, "R", "W")
+    assert "No position could be judged" in report._verdict_sentence({"alternative": 0, "reference": 0, "both": 0, "none": 5}, "R", "W")
+    assert "mixed" in report._verdict_sentence({"alternative": 2, "reference": 1, "both": 0, "none": 5}, "R", "W")
+    assert report.build_pdf(run(sim, with_b=False), {"report": "r"}).startswith(b"%PDF")

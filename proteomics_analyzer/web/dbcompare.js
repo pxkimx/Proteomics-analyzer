@@ -58,7 +58,7 @@ function renderDb() {
   $('#db-read').innerHTML = ro('differing positions', s.n_sites) + ro('alternative seen', c.alternative, 'up') + ro('reference seen', c.reference, 'down') +
     ro('both seen', c.both) + ro('no coverage', c.none) + ro('peptides in report', s.n_peptides.toLocaleString()) +
     (s.n_unpaired ? ro('unpaired variants', s.n_unpaired) : '');
-  fillSites(); drawDbScatter();
+  fillSites(); drawDbScatter(); drawDbCover();
 }
 function peptideLine(p, version, samples) {
   const mx = Math.max(...p.intensity, 1);
@@ -116,3 +116,41 @@ function drawDbScatter() {
 }
 
 buildSlots();
+
+/* ---------- coverage ---------- */
+function barChart(id, labels, values, color, fmt) {
+  const cvs = $('#' + id); if (!cvs.clientWidth) return;
+  const n = values.length, fr = frame(cvs, { xr: [0, n], yr: [0, Math.max(...values, 1) * 1.15], box: [54, 12, 14, 40], noX: true });
+  const bw = (fr.w - fr.L - fr.R) / n; fr.c.fillStyle = color;
+  values.forEach((v, i) => {
+    fr.c.fillRect(fr.L + i * bw + bw * .12, fr.Y(v), bw * .76, fr.Y(0) - fr.Y(v));
+    fr.c.fillStyle = INK; fr.c.textAlign = 'center'; fr.c.textBaseline = 'bottom'; if (bw > 22) fr.c.fillText(fmt ? fmt(v) : v, fr.L + (i + .5) * bw, fr.Y(v) - 2);
+    fr.c.fillStyle = color;
+  });
+  fr.c.fillStyle = MUTE; fr.c.textBaseline = 'top'; fr.c.textAlign = 'center';
+  labels.forEach((l, i) => { if (n <= 14 || i % 2 === 0) fr.c.fillText(l, fr.L + (i + .5) * bw, fr.h - fr.B + 6); });
+}
+function drawDbCover() {
+  const r = DBS.result; if (!r || !r.coverage || !$('#c-cv1').clientWidth) return;
+  const c = r.coverage;
+  $('#cv-read').innerHTML = ro('proteins detected', `${c.n_detected.toLocaleString()} / ${c.n_proteins.toLocaleString()}`) + ro('detected %', (100 * c.n_detected / c.n_proteins).toFixed(0) + '%') +
+    ro('with ≥2 peptides', c.n_ge2.toLocaleString()) + ro('residues covered', c.overall_cov.toFixed(1) + '%') + ro('median coverage', c.median_cov.toFixed(1) + '%') +
+    ro('alternative proteins seen', `${c.variant_proteins_detected} / ${c.variant_proteins}`);
+  barChart('c-cv1', c.hist.map((_, i) => i * 10 + '+'), c.hist, '#2dd4bf');
+  barChart('c-cv2', c.by_length.map(b => b.label), c.by_length.map(b => b.n ? 100 * b.detected / b.n : 0), '#38bdf8', v => v.toFixed(0) + '%');
+  const pl = Object.entries(c.pep_lengths); barChart('c-cv3', pl.map(x => x[0]), pl.map(x => x[1]), '#fbbf24');
+  const ch = Object.entries(c.charges); barChart('c-cv4', ch.map(x => x[0] + '+'), ch.map(x => x[1]), '#c4b5fd');
+  fillCover();
+}
+let cvSort = { k: 'coverage_pct', dir: -1 };
+function fillCover() {
+  const r = DBS.result; if (!r || !r.coverage) return;
+  const f = $('#cv-filter').value, q = $('#cv-search').value.trim().toUpperCase(), { k, dir } = cvSort;
+  let rows = r.coverage.proteins.filter(p => (f === 'all' || (f === 'det' ? p.n_peptides > 0 : f === 'miss' ? p.n_peptides === 0 : p.has_variant)) &&
+    (!q || p.protein.toUpperCase().includes(q) || p.description.toUpperCase().includes(q)));
+  rows.sort((a, b) => (a[k] > b[k] ? 1 : a[k] < b[k] ? -1 : 0) * dir);
+  $('#t-cv tbody').innerHTML = rows.slice(0, 300).map(p => `<tr><td>${esc(shortId(p.protein))}${p.has_variant ? ' <span class="badge b-alternative">alt</span>' : ''}</td><td>${esc(p.description)}</td><td class="num">${p.length}</td><td class="num">${p.n_peptides}</td><td class="num">${p.coverage_pct.toFixed(1)}</td></tr>`).join('');
+  $('#cv-foot').textContent = `${Math.min(rows.length, 300)} of ${rows.length} proteins shown. The CSV on the Report page has all of them.`;
+}
+$('#cv-filter').onchange = $('#cv-search').oninput = fillCover;
+$('#t-cv thead').addEventListener('click', e => { const th = e.target.closest('th'); if (!th) return; const k = th.dataset.k; cvSort = { k, dir: cvSort.k === k ? -cvSort.dir : 1 }; fillCover(); });

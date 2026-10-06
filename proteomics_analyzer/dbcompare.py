@@ -66,6 +66,7 @@ class Pairing:
     identical: int = 0                                      # alt entries equal to their reference
     ref_pool: dict[str, str] = field(default_factory=dict)
     alt_pool: dict[str, str] = field(default_factory=dict)
+    ref_headers: dict[str, str] = field(default_factory=dict)
 
 
 def pair_databases(ref: dict, alt: dict | None = None, marker: str = "") -> Pairing:
@@ -117,7 +118,7 @@ def pair_databases(ref: dict, alt: dict | None = None, marker: str = "") -> Pair
             continue
         pairs.append(Pair(best, aid, refs[best][0], refs[best][1], aseq, best_d))
     return Pairing(pairs, unpaired, identical, {k: v[1] for k, v in refs.items()},
-                   {k: v[1] for k, v in alts.items()})
+                   {k: v[1] for k, v in alts.items()}, {k: v[0] for k, v in refs.items()})
 
 
 # ---------------------------------------------------------------- peptide reports
@@ -186,12 +187,89 @@ def _count(blob: str, pep: str) -> int:
     return n
 
 
+LENGTH_BINS = [(0, 150, "under 150"), (150, 300, "150-300"), (300, 600, "300-600"), (600, 10 ** 9, "over 600")]
+
+
+def coverage(pairing: Pairing, table: PeptideTable) -> dict:
+    """How much of the reference proteome the identified peptides cover."""
+    import bisect
+    ids = list(pairing.ref_pool)
+    seqs = [pairing.ref_pool[i] for i in ids]
+    offsets, blob, pos = [], [], 0
+    for sq in seqs:
+        offsets.append(pos)
+        blob.append(sq)
+        pos += len(sq) + 1
+    blob = "\n".join(blob)
+    cov = [bytearray(len(sq)) for sq in seqs]
+    peps_of = [set() for _ in ids]
+    unmapped = shared = 0
+    for pep in table.peptides:
+        hits, i = set(), blob.find(pep)
+        while i != -1:
+            j = bisect.bisect_right(offsets, i) - 1
+            start = i - offsets[j]
+            if start + len(pep) <= len(seqs[j]):
+                hits.add(j)
+                cov[j][start:start + len(pep)] = b"\x01" * len(pep)
+                peps_of[j].add(pep)
+            i = blob.find(pep, i + 1)
+        if not hits:
+            unmapped += 1
+        elif len(hits) > 1:
+            shared += 1
+    variant_ids = {p.ref_id for p in pairing.pairs}
+    rows = []
+    for j, pid in enumerate(ids):
+        n = len(seqs[j])
+        rows.append({"protein": pid, "description": pairing.ref_headers.get(pid, "")[len(pid):].strip()[:140],
+                     "length": n, "n_peptides": len(peps_of[j]),
+                     "coverage_pct": round(100 * sum(cov[j]) / n, 1) if n else 0.0,
+                     "has_variant": pid in variant_ids})
+    det = [r for r in rows if r["n_peptides"] > 0]
+    pct = [r["coverage_pct"] for r in det]
+    total_res = sum(r["length"] for r in rows)
+    covered = sum(sum(c) for c in cov)
+    by_len = []
+    for lo, hi, label in LENGTH_BINS:
+        grp = [r for r in rows if lo <= r["length"] < hi]
+        by_len.append({"label": label, "n": len(grp), "detected": sum(r["n_peptides"] > 0 for r in grp)})
+    lengths = {}
+    for pep in table.peptides:
+        lengths[len(pep)] = lengths.get(len(pep), 0) + 1
+    charges: dict[str, int] = {}
+    for v in table.peptides.values():
+        for c in v["charges"]:
+            charges[c] = charges.get(c, 0) + 1
+    missed: dict[int, int] = {}
+    for pep in table.peptides:
+        m = _missed(pep)
+        missed[m] = missed.get(m, 0) + 1
+    ints = sorted((float(v["intensity"].sum()) for v in table.peptides.values() if v["intensity"].sum() > 0))
+    var_rows = [r for r in rows if r["has_variant"]]
+    return {
+        "n_proteins": len(rows), "n_residues": total_res, "n_detected": len(det),
+        "n_ge2": sum(r["n_peptides"] >= 2 for r in rows), "n_ge3": sum(r["n_peptides"] >= 3 for r in rows),
+        "n_ge5": sum(r["n_peptides"] >= 5 for r in rows),
+        "median_cov": float(np.median(pct)) if pct else 0.0, "mean_cov": float(np.mean(pct)) if pct else 0.0,
+        "n_cov50": sum(p >= 50 for p in pct), "overall_cov": 100 * covered / total_res if total_res else 0.0,
+        "hist": np.histogram(pct, bins=10, range=(0, 100))[0].tolist() if pct else [0] * 10,
+        "by_length": by_len, "pep_lengths": {str(k): v for k, v in sorted(lengths.items())},
+        "charges": dict(sorted(charges.items())), "missed": {str(k): v for k, v in sorted(missed.items())},
+        "n_unmapped": unmapped, "n_shared": shared, "n_peptides": len(table.peptides),
+        "intensity_orders": float(np.log10(ints[-1] / ints[0])) if len(ints) > 1 else 0.0,
+        "variant_proteins": len(var_rows), "variant_proteins_detected": sum(r["n_peptides"] > 0 for r in var_rows),
+        "proteins": rows,
+    }
+
+
 @dataclass
 class Result:
     samples: list[str]
     sites: list[dict]
     summary: dict
     scatter: dict
+    coverage: dict = field(default_factory=dict)
 
 
 def analyse(pairing: Pairing, table: PeptideTable, table_b: PeptideTable | None = None) -> Result:
@@ -252,7 +330,7 @@ def analyse(pairing: Pairing, table: PeptideTable, table_b: PeptideTable | None 
                    "b": np.log2(b[ok])[idx].round(3).tolist() if len(idx) else [],
                    "n_shared": len(shared), "n_only_a": len(pep_a) - len(shared),
                    "n_only_b": len(pep_b) - len(shared), "r": r}
-    return Result(table.samples, sites, summary, scatter)
+    return Result(table.samples, sites, summary, scatter, coverage(pairing, table))
 
 
 def sites_frame(res: Result) -> pd.DataFrame:
@@ -288,3 +366,7 @@ def peptides_frame(res: Result) -> pd.DataFrame:
                     row[f"intensity_{name}"] = v
                 rows.append(row)
     return pd.DataFrame(rows)
+
+
+def coverage_frame(res: Result) -> pd.DataFrame:
+    return pd.DataFrame(res.coverage["proteins"]).rename(columns={"has_variant": "has_alternative_version"})

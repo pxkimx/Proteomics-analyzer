@@ -24,7 +24,8 @@ def test_maxquant_load_removes_flagged_rows(sim):
     assert ds.removed["only identified by site"] == 6
     assert ds.samples == ["Control_1", "Control_2", "Control_3", "Control_4",
                           "Treated_1", "Treated_2", "Treated_3", "Treated_4"]
-    assert (ds.matrix.stack() > 0).all()                       # zeros became NaN
+    vals = ds.matrix.to_numpy().ravel()
+    assert (vals[~np.isnan(vals)] > 0).all()                   # zeros became NaN
 
 
 def test_group_guess():

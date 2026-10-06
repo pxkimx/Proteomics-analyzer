@@ -55,6 +55,12 @@ fi
 "$VENV/bin/python" -c "import numpy, pandas, scipy" 2>>"$LOG" \
   || { rm -rf "$VENV"; fail "The Python environment was damaged and has been reset. Open the app again."; }
 
+# Packages added in later versions (PDF reports): install them into an existing environment.
+if ! "$VENV/bin/python" -c "import reportlab" 2>/dev/null; then
+  log "Installing the PDF report package…"
+  "$VENV/bin/pip" install --quiet -r "$APP_DIR/requirements.txt" >>"$LOG" 2>&1 || log "Could not install reportlab; PDF reports will be unavailable."
+fi
+
 if [ "${1:-}" = "--selftest" ]; then
   cd "$APP_DIR" && "$VENV/bin/python" -c "import proteomics_analyzer.server, proteomics_analyzer.example as e; print('self-test ok', len(e.example_bytes()), 'bytes')"
   exit $?

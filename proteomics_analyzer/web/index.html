@@ -29,8 +29,9 @@
     <button data-mode="quant" data-page="export"><i>07</i>Export</button>
     <button data-mode="db" data-page="dbfiles" hidden><i>01</i>Files</button>
     <button data-mode="db" data-page="dbsites" hidden><i>02</i>Sites</button>
-    <button data-mode="db" data-page="dbscatter" hidden><i>03</i>Standard search</button>
-    <button data-mode="db" data-page="dbexport" hidden><i>04</i>Export</button>
+    <button data-mode="db" data-page="dbcover" hidden><i>03</i>Coverage</button>
+    <button data-mode="db" data-page="dbscatter" hidden><i>04</i>Standard search</button>
+    <button data-mode="db" data-page="dbexport" hidden><i>05</i>Report</button>
   </nav>
   <div class="tools">
     <label class="sw" title="Animated background"><input type="checkbox" id="anim" checked><span></span>Animation</label>
@@ -210,9 +211,29 @@
       <p class="small">“Alternative version seen” means a peptide containing the alternative residue was identified and the reference version was not. It is only as reliable as the search's own false-discovery control, and a single peptide is thin evidence: check the spectra of the peptides that matter. Missing coverage is not evidence against a version, because many positions fall inside peptides that were never identified.</p></div>
   </section>
 
+  <!-- DB COVERAGE -->
+  <section id="p-dbcover" class="page">
+    <div class="lead"><div class="kicker">Database check · step 3</div><h2>How much of the proteome was seen?</h2>
+      <p>Protein coverage is the share of proteins with at least one identified peptide. Sequence coverage is the share of a protein's amino acids that fall inside identified peptides. Both are measured against the reference proteins.</p></div>
+    <div class="readouts" id="cv-read"></div>
+    <div class="grid2">
+      <figure class="card"><figcaption>Sequence coverage of detected proteins <button class="ghost sm" data-save="c-cv1">PNG</button></figcaption><canvas id="c-cv1" height="260"></canvas></figure>
+      <figure class="card"><figcaption>Proteins detected, by protein size</figcaption><canvas id="c-cv2" height="260"></canvas></figure>
+      <figure class="card"><figcaption>Peptide length (amino acids)</figcaption><canvas id="c-cv3" height="260"></canvas></figure>
+      <figure class="card"><figcaption>Peptides by charge state</figcaption><canvas id="c-cv4" height="260"></canvas></figure>
+    </div>
+    <div class="card">
+      <div class="bar"><div class="kicker">Proteins</div>
+        <select id="cv-filter"><option value="all">All proteins</option><option value="det">Detected</option><option value="miss">Not detected</option><option value="var">Has an alternative version</option></select>
+        <input id="cv-search" type="search" placeholder="search protein or description…"></div>
+      <div class="tscroll"><table class="tbl" id="t-cv"><thead><tr><th data-k="protein">Protein</th><th data-k="description">Description</th><th data-k="length">Length</th><th data-k="n_peptides">Peptides</th><th data-k="coverage_pct">Coverage %</th></tr></thead><tbody></tbody></table></div>
+      <div class="small" id="cv-foot"></div>
+    </div>
+  </section>
+
   <!-- DB 03 STANDARD SEARCH -->
   <section id="p-dbscatter" class="page">
-    <div class="lead"><div class="kicker">Database check · step 3</div><h2>Compared with the standard-database search</h2>
+    <div class="lead"><div class="kicker">Database check · step 4</div><h2>Compared with the standard-database search</h2>
       <p>Peptides identified when the same data were searched against the standard database only, against the search that included the alternative proteins.</p></div>
     <div class="readouts" id="db-sread"></div>
     <div class="grid2">
@@ -223,8 +244,10 @@
 
   <!-- DB 04 EXPORT -->
   <section id="p-dbexport" class="page">
-    <div class="lead"><div class="kicker">Database check · step 4</div><h2>Export</h2></div>
+    <div class="lead"><div class="kicker">Database check · step 5</div><h2>Report and export</h2></div>
     <div class="grid3">
+      <a class="card dl" href="/api/download/db_report" download><div class="kicker">PDF</div><h3>Final report</h3><p>The whole analysis explained in plain English, with figures, a results table, caveats, next steps and a glossary.</p></a>
+      <a class="card dl" href="/api/download/db_coverage" download><div class="kicker">CSV</div><h3>Coverage</h3><p>Every reference protein: length, number of peptides, percent of the sequence covered.</p></a>
       <a class="card dl" href="/api/download/db_sites" download><div class="kicker">CSV</div><h3>Sites</h3><p>One row per differing position with its verdict and peptides.</p></a>
       <a class="card dl" href="/api/download/db_peptides" download><div class="kicker">CSV</div><h3>Peptides</h3><p>Every peptide that spans a site, with start, end, charge, missed cleavages and intensity in each run.</p></a>
     </div>

@@ -31,7 +31,7 @@ const order = ['data', 'groups', 'process', 'qc', 'diff', 'enrich', 'export'];
 function reach() {
   const st = S.st, r = DBS.result;
   return { data: true, groups: st.loaded, process: st.loaded, qc: st.analysed, diff: st.analysed, enrich: !!S.comp, export: st.analysed,
-    dbfiles: true, dbsites: !!r, dbscatter: !!(r && r.summary.has_b), dbexport: !!r };
+    dbfiles: true, dbsites: !!r, dbcover: !!r, dbscatter: !!(r && r.summary.has_b), dbexport: !!r };
 }
 function updateNav() {
   const r = reach();
@@ -349,7 +349,7 @@ $('#en-run').onclick = e => busy(e.target, async () => {
 });
 
 /* ---------- redraw / lifecycle ---------- */
-function redraw(page) { if (page === 'qc') drawQc(); if (page === 'diff') drawDiff(); if (page === 'dbscatter' && window.drawDbScatter) drawDbScatter(); }
+function redraw(page) { if (page === 'qc') drawQc(); if (page === 'diff') drawDiff(); if (page === 'dbscatter' && window.drawDbScatter) drawDbScatter(); if (page === 'dbcover' && window.drawDbCover) drawDbCover(); }
 let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => redraw(S.page), 120); });
 $('#anim').onchange = e => window.setBackgroundAnimation(e.target.checked);
 $('#quit').onclick = async () => { if (!confirm('Quit Proteomics Analyzer?')) return; try { await api('/api/quit', {}); } catch (e) {} document.body.innerHTML = '<p style="padding:40px;color:#8fb5b4;font:16px sans-serif">Proteomics Analyzer has quit. You can close this tab.</p>'; };

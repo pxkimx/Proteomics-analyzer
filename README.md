@@ -22,6 +22,8 @@ A second mode (switch at the top of the page) for a different question: the same
 
 You load the peptide report (DIA-NN `report.pr_matrix.tsv`), the reference FASTA, and, optionally, the alternative FASTA. If one FASTA holds both standard and variant proteins, give the text that marks the variant IDs. The program pairs each variant with its reference protein, finds every position where they differ, and lists the identified peptides that span that position. Only such a peptide can tell the two versions apart. Peptides that also occur elsewhere in the database are shown as ambiguous and not counted. A report from a search against the standard database alone can be added for comparison.
 
+A **Coverage** page reports how much of the reference proteome the run saw: proteins detected, how many with two or more peptides, the share of all amino acids covered, detection by protein size, and a per-protein table. The **Report** page downloads a **PDF written in plain English** (summary, what was measured, coverage, the question, results, caveats, next steps, glossary, methods) and CSVs of sites, peptides and coverage.
+
 Each site gets a verdict: *alternative seen*, *reference seen*, *both seen*, or *no coverage*. Treat a verdict as a lead to check against the spectra, not as proof: it is only as reliable as the search's own false-discovery control, and a single peptide is thin evidence. *No coverage* is not evidence against either version.
 
 ## Run it
