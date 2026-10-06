@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proteomics Analyzer</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+<div id="veil" aria-hidden="true"></div>
+
+<header id="top">
+  <div class="brand">
+    <svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><use href="icon.svg#mark"/></svg>
+    <div><div class="kicker">LC–MS/MS · protein level</div><h1>Proteomics Analyzer</h1></div>
+  </div>
+  <nav id="nav" aria-label="Workflow">
+    <button data-page="data" class="on"><i>01</i>Data</button>
+    <button data-page="groups"><i>02</i>Groups</button>
+    <button data-page="process"><i>03</i>Process</button>
+    <button data-page="qc"><i>04</i>Quality</button>
+    <button data-page="diff"><i>05</i>Differential</button>
+    <button data-page="enrich"><i>06</i>Enrichment</button>
+    <button data-page="export"><i>07</i>Export</button>
+  </nav>
+  <div class="tools">
+    <label class="sw" title="Animated background"><input type="checkbox" id="anim" checked><span></span>Animation</label>
+    <button id="quit" class="ghost" title="Stop the program">Quit</button>
+  </div>
+</header>
+
+<main>
+  <div id="toast" role="status"></div>
+
+  <!-- 01 DATA -->
+  <section id="p-data" class="page on">
+    <div class="lead"><div class="kicker">Step 1</div><h2>Load a protein quantification table</h2>
+      <p>MaxQuant <code>proteinGroups.txt</code>, a DIA-NN <code>pg_matrix</code>, or any table with one row per protein and one numeric column per sample (TSV, CSV or Excel). Everything stays on this computer.</p></div>
+    <div class="grid2">
+      <div id="drop" class="drop" tabindex="0">
+        <svg viewBox="0 0 64 40" width="84" height="52" aria-hidden="true"><path d="M2 36h60M10 36V22M16 36V12M22 36V26M30 36V6M36 36V20M44 36V16M52 36V28" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+        <b>Drop a file here</b><span>or</span>
+        <button id="browse" class="btn">Browse…</button>
+        <input type="file" id="file" accept=".txt,.tsv,.csv,.xlsx,.xls" hidden>
+        <small>Up to 400 MB</small>
+      </div>
+      <div class="card">
+        <div class="kicker">No data yet?</div>
+        <h3>Try the simulated example</h3>
+        <p>A MaxQuant-style table with 3,000 invented proteins, two groups of four runs, left-censored missing values, and flagged contaminants. The truth is known, so it is a safe way to see every step. It is simulated, not real biology.</p>
+        <button id="example" class="btn alt">Load simulated example</button>
+      </div>
+    </div>
+    <div id="loaded" class="card hidden">
+      <div class="kicker">Loaded</div><h3 id="l-name"></h3>
+      <div class="readouts" id="l-read"></div>
+      <ul id="l-notes" class="notes"></ul>
+      <label id="kindrow" class="inline hidden">Intensity columns
+        <select id="kind"></select></label>
+      <div class="actions"><button class="btn" data-go="groups">Next: assign groups →</button></div>
+    </div>
+  </section>
+
+  <!-- 02 GROUPS -->
+  <section id="p-groups" class="page">
+    <div class="lead"><div class="kicker">Step 2</div><h2>Assign samples to groups</h2>
+      <p>Replicates share a group name. Leave a group empty to leave that sample out. Names were guessed from the sample names; edit freely.</p></div>
+    <div class="card">
+      <table class="tbl" id="gtable"><thead><tr><th>Sample</th><th>Group</th></tr></thead><tbody></tbody></table>
+      <datalist id="glist"></datalist>
+      <div class="actions"><button class="btn ghost" id="guess">Re-guess from names</button>
+        <button class="btn" id="gsave">Next: processing →</button></div>
+    </div>
+  </section>
+
+  <!-- 03 PROCESS -->
+  <section id="p-process" class="page">
+    <div class="lead"><div class="kicker">Step 3</div><h2>Filter, normalise, impute</h2>
+      <p>Intensities are log2-transformed first. Each choice is recorded in the exported settings file.</p></div>
+    <div class="grid2">
+      <div class="card form">
+        <label>Normalisation
+          <select id="pr-norm"><option value="median">Median (centre each sample)</option><option value="quantile">Quantile</option><option value="none">None</option></select></label>
+        <label>Keep proteins with at least
+          <span class="row"><input type="number" id="pr-min" min="1" value="2" step="1"> valid values in
+          <select id="pr-rule"><option value="any">at least one group</option><option value="all">every group</option></select></span></label>
+        <label>Missing values
+          <select id="pr-imp"><option value="downshift">Impute: down-shifted normal (Perseus-style)</option><option value="halfmin">Impute: half of the sample minimum</option><option value="none">Do not impute</option></select></label>
+        <div class="row sub" id="pr-ds"><label>Shift (SD)<input type="number" id="pr-shift" value="1.8" step="0.1" min="0"></label>
+          <label>Width (SD)<input type="number" id="pr-width" value="0.3" step="0.05" min="0.05"></label>
+          <label>Seed<input type="number" id="pr-seed" value="1" step="1"></label></div>
+        <button class="btn" id="run">Run processing</button>
+      </div>
+      <div class="card">
+        <div class="kicker">What happens</div>
+        <ol class="steps"><li>log2 transform; zeros are treated as “not quantified”.</li>
+          <li>Proteins without enough valid values are dropped.</li>
+          <li>Samples are normalised.</li>
+          <li>Missing values are imputed, assuming they are mostly low-abundance proteins that fell below detection. Imputed values are flagged and counted wherever it matters.</li></ol>
+        <div id="pr-log" class="log"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 QC -->
+  <section id="p-qc" class="page">
+    <div class="lead"><div class="kicker">Step 4</div><h2>Quality control</h2>
+      <p>Check these before trusting any comparison: similar depth across runs, aligned medians after normalisation, replicates that cluster together.</p></div>
+    <div class="readouts" id="qc-read"></div>
+    <div class="grid2">
+      <figure class="card"><figcaption>Proteins per sample</figcaption><canvas id="c-ident" height="260"></canvas></figure>
+      <figure class="card"><figcaption>Log2 intensity per sample <span class="pill" id="boxwhich"><button class="on" data-w="raw">raw</button><button data-w="norm">normalised</button></span></figcaption><canvas id="c-box" height="260"></canvas></figure>
+      <figure class="card"><figcaption>Principal components <select id="pcsel"></select></figcaption><canvas id="c-pca" height="400"></canvas></figure>
+      <figure class="card"><figcaption>Sample correlation</figcaption><canvas id="c-corr" height="400"></canvas></figure>
+      <figure class="card"><figcaption>Coefficient of variation within groups</figcaption><canvas id="c-cv" height="260"></canvas></figure>
+      <figure class="card"><figcaption>Dynamic range (mean log2 intensity by rank)</figcaption><canvas id="c-rank" height="260"></canvas></figure>
+    </div>
+    <div class="actions"><button class="btn" data-go="diff">Next: differential analysis →</button></div>
+  </section>
+
+  <!-- 05 DIFF -->
+  <section id="p-diff" class="page">
+    <div class="lead"><div class="kicker">Step 5</div><h2>Differential abundance</h2></div>
+    <div class="card bar">
+      <label>Compare <select id="d-a"></select> <span class="vs">vs</span> <select id="d-b"></select></label>
+      <label>Test <select id="d-method"><option value="moderated">Moderated t (limma-style)</option><option value="welch">Welch t</option></select></label>
+      <label>Data <select id="d-use"><option value="imputed">with imputed values</option><option value="observed">observed values only</option></select></label>
+      <label>FDR ≤ <input type="number" id="d-fdr" value="0.05" step="0.01" min="0.001" max="1"></label>
+      <label>|log2 FC| ≥ <input type="number" id="d-lfc" value="1" step="0.1" min="0"></label>
+      <button class="btn" id="d-run">Run</button>
+    </div>
+    <div id="d-out" class="hidden">
+      <div class="readouts" id="d-read"></div>
+      <div class="grid2 wide">
+        <figure class="card"><figcaption>Volcano <input id="d-find" placeholder="find gene…" type="search"> <button class="ghost sm" data-save="c-volc">PNG</button></figcaption>
+          <div class="cwrap"><canvas id="c-volc" height="440"></canvas><div id="tip" class="tip hidden"></div></div></figure>
+        <figure class="card"><figcaption id="sel-title">Select a protein</figcaption><canvas id="c-sel" height="300"></canvas><div id="sel-info" class="small"></div></figure>
+      </div>
+      <figure class="card"><figcaption>Significant proteins, z-scored <button class="ghost sm" data-save="c-heat">PNG</button></figcaption><canvas id="c-heat" height="420"></canvas></figure>
+      <div class="card">
+        <div class="bar"><div class="kicker">Results table</div>
+          <select id="t-filter"><option value="sig">Significant</option><option value="up">Up</option><option value="down">Down</option><option value="all">All tested</option></select>
+          <input id="t-search" type="search" placeholder="search gene or ID…"></div>
+        <div class="tscroll"><table class="tbl" id="t-res"><thead><tr>
+          <th data-k="gene">Gene</th><th data-k="protein">Protein</th><th data-k="log2fc">log2 FC</th><th data-k="mean_a">Mean A</th><th data-k="mean_b">Mean B</th><th data-k="p_value">p</th><th data-k="adj_p">FDR</th><th data-k="n_a_observed">Obs A</th><th data-k="n_b_observed">Obs B</th></tr></thead><tbody></tbody></table></div>
+        <div class="small" id="t-foot"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06 ENRICH -->
+  <section id="p-enrich" class="page">
+    <div class="lead"><div class="kicker">Step 6</div><h2>Gene-set enrichment</h2>
+      <p>Over-representation of your significant proteins in gene sets you provide, tested against every protein quantified in the comparison. Sets come from a <code>.gmt</code> file (for example from MSigDB or Enrichr), so nothing is looked up online.</p></div>
+    <div class="card form">
+      <div id="gmtdrop" class="drop slim" tabindex="0"><b>Drop a .gmt file</b> <span>or</span> <button class="btn" id="gmtbrowse">Browse…</button><input type="file" id="gmtfile" accept=".gmt,.txt" hidden> <small id="gmtname">none loaded</small></div>
+      <label>Proteins to test <select id="en-dir"><option value="both">Up and down</option><option value="up">Up only</option><option value="down">Down only</option></select></label>
+      <button class="btn" id="en-run">Run enrichment</button>
+    </div>
+    <div id="en-out" class="card hidden"><div class="small" id="en-info"></div>
+      <div class="tscroll"><table class="tbl" id="t-en"><thead><tr><th>Gene set</th><th>Size</th><th>Hits</th><th>Fold</th><th>p</th><th>FDR</th><th>Genes</th></tr></thead><tbody></tbody></table></div></div>
+  </section>
+
+  <!-- 07 EXPORT -->
+  <section id="p-export" class="page">
+    <div class="lead"><div class="kicker">Step 7</div><h2>Export</h2></div>
+    <div class="grid3">
+      <a class="card dl" id="x-res" href="/api/download/results" download><div class="kicker">CSV</div><h3>Differential results</h3><p>Every tested protein: fold change, p, FDR, call.</p></a>
+      <a class="card dl" id="x-proc" href="/api/download/processed" download><div class="kicker">CSV</div><h3>Processed matrix</h3><p>Normalised, imputed log2 intensities.</p></a>
+      <a class="card dl" id="x-set" href="/api/download/settings" download><div class="kicker">JSON</div><h3>Analysis settings</h3><p>Groups, parameters and each processing step, for the methods section.</p></a>
+    </div>
+  </section>
+</main>
+<footer>Proteomics Analyzer <span id="ver"></span> · runs entirely on this computer</footer>
+<script src="bg.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
