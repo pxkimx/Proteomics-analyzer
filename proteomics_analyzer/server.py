@@ -14,8 +14,8 @@ from urllib.parse import parse_qs, urlparse
 import numpy as np
 import pandas as pd
 
-from . import __version__, loaders, pipeline, stats
-from .example import example_bytes
+from . import __version__, dbcompare, loaders, pipeline, stats
+from .example import example_bytes, simulate_db
 from .lifecycle import Lifecycle
 
 WEB = Path(__file__).resolve().parent / "web"
@@ -191,7 +191,93 @@ class Session:
             raise ValueError("Run the processing step first.")
 
 
+class DbSession:
+    """Inputs and result of the database-comparison mode."""
+
+    SLOTS = ("report", "report_b", "fasta_ref", "fasta_alt")
+
+    def __init__(self):
+        self.lock = threading.RLock()
+        self.reset()
+
+    def reset(self):
+        self.files: dict[str, dict] = {}            # slot -> {"name", "text"/"table"}
+        self.result: dbcompare.Result | None = None
+        self.is_example = False
+
+    def state(self) -> dict:
+        info = {k: {"name": v["name"], "detail": v["detail"]} for k, v in self.files.items()}
+        out = {"files": info, "ready": "report" in self.files and "fasta_ref" in self.files,
+               "is_example": self.is_example, "has_result": self.result is not None}
+        if self.result is not None:
+            out["result"] = self._payload()
+        return out
+
+    def load(self, slot: str, raw: bytes, name: str) -> dict:
+        if slot not in self.SLOTS:
+            raise ValueError("Unknown slot.")
+        with self.lock:
+            if slot in ("report", "report_b"):
+                t = dbcompare.read_peptides(raw, name)
+                self.files[slot] = {"name": name, "table": t,
+                                    "detail": f"{len(t.peptides):,} peptides, {len(t.samples)} run(s)"}
+            else:
+                text = raw.decode("utf-8-sig", errors="replace")
+                fa = dbcompare.parse_fasta(text)
+                if not fa:
+                    raise ValueError("No FASTA entries found (lines starting with “>”).")
+                self.files[slot] = {"name": name, "fasta": fa, "detail": f"{len(fa):,} proteins"}
+            self.result = None
+            return self.state()
+
+    def drop(self, slot: str) -> dict:
+        with self.lock:
+            self.files.pop(slot, None)
+            self.result = None
+            return self.state()
+
+    def example(self) -> dict:
+        e = simulate_db()
+        with self.lock:
+            self.reset()
+            self.is_example = True
+        for slot, key, name in (("report", "report", "simulated_report.pr_matrix.tsv"),
+                                ("report_b", "report_b", "simulated_standard_only.pr_matrix.tsv"),
+                                ("fasta_ref", "ref_fasta", "simulated_standard.fasta"),
+                                ("fasta_alt", "alt_fasta", "simulated_variants.fasta")):
+            self.load(slot, e[key].encode(), name)
+        return self.state()
+
+    def run(self, marker: str) -> dict:
+        with self.lock:
+            if "report" not in self.files or "fasta_ref" not in self.files:
+                raise ValueError("Load the peptide report and the protein FASTA first.")
+            ref = self.files["fasta_ref"]["fasta"]
+            alt = self.files["fasta_alt"]["fasta"] if "fasta_alt" in self.files else None
+            pairing = dbcompare.pair_databases(ref, alt, marker.strip())
+            if not pairing.pairs:
+                raise ValueError("No protein differs between the two databases"
+                                 + (f" ({len(pairing.unpaired)} alternative proteins could not be paired: "
+                                    "they have no reference protein of the same length)." if pairing.unpaired else "."))
+            b = self.files["report_b"]["table"] if "report_b" in self.files else None
+            self.result = dbcompare.analyse(pairing, self.files["report"]["table"], b)
+            return self._payload()
+
+    def _payload(self) -> dict:
+        r = self.result
+        return {"samples": r.samples, "sites": r.sites, "summary": r.summary, "scatter": r.scatter}
+
+    def csv(self, which: str) -> tuple[str, bytes]:
+        with self.lock:
+            if self.result is None:
+                raise ValueError("Run the comparison first.")
+            df = dbcompare.sites_frame(self.result) if which == "db_sites" else dbcompare.peptides_frame(self.result)
+            return ("database_comparison_sites.csv" if which == "db_sites" else "database_comparison_peptides.csv",
+                    df.to_csv(index=False).encode())
+
+
 SESSION = Session()
+DB = DbSession()
 LIFE: Lifecycle | None = None
 
 
@@ -239,12 +325,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(SESSION.state())
         if u.path == "/api/window":
             return self._window()
+        if u.path == "/api/db/state":
+            return self._json(DB.state())
         if u.path == "/api/protein":
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
             return self._guard(lambda: SESSION.protein(q.get("id", "")))
         if u.path.startswith("/api/download/"):
             try:
-                name, data = SESSION.csv(u.path.rsplit("/", 1)[1])
+                which = u.path.rsplit("/", 1)[1]
+                name, data = DB.csv(which) if which.startswith("db_") else SESSION.csv(which)
             except ValueError as e:
                 return self._json({"error": str(e)}, 400)
             ctype = "application/json" if name.endswith(".json") else "text/csv"
@@ -268,6 +357,14 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/example":
             return self._guard(lambda: SESSION.load(example_bytes(), "simulated_proteinGroups.txt",
                                                     None, example=True))
+        if u.path == "/api/db/load":
+            return self._guard(lambda: DB.load(q.get("slot", ""), body, q.get("name", "file")))
+        if u.path == "/api/db/drop":
+            return self._guard(lambda: DB.drop(q.get("slot", "")))
+        if u.path == "/api/db/example":
+            return self._guard(DB.example)
+        if u.path == "/api/db/run":
+            return self._guard(lambda: DB.run(str(js().get("marker", ""))))
         if u.path == "/api/kind":
             return self._guard(lambda: SESSION.reload_kind(q.get("kind", "")))
         if u.path == "/api/groups":

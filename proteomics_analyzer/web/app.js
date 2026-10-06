@@ -1,7 +1,8 @@
 /* Proteomics Analyzer front end. No dependencies; plots are drawn on canvases. */
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const S = { st: null, qc: null, comp: null, sel: null, boxWhich: 'raw', pc: [0, 1], gmt: '', sort: { k: 'p_value', dir: 1 }, hover: null };
+const S = { mode: 'quant', last: { quant: 'data', db: 'dbfiles' }, st: null, qc: null, comp: null, sel: null, boxWhich: 'raw', pc: [0, 1], gmt: '', sort: { k: 'p_value', dir: 1 }, hover: null };
+const DBS = { st: null, result: null };
 const PAL = ['#2dd4bf', '#fbbf24', '#38bdf8', '#f472b6', '#a3e635', '#c084fc', '#fb923c', '#94a3b8'];
 const INK = '#cfe9e6', MUTE = '#7fa6a5', GRID = 'rgba(94,234,212,.12)';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
@@ -28,14 +29,25 @@ const gcolor = g => PAL[levels().indexOf(g) % PAL.length] || PAL[7];
 /* ---------- navigation ---------- */
 const order = ['data', 'groups', 'process', 'qc', 'diff', 'enrich', 'export'];
 function reach() {
-  const st = S.st; return { data: true, groups: st.loaded, process: st.loaded, qc: st.analysed, diff: st.analysed, enrich: !!S.comp, export: st.analysed };
+  const st = S.st, r = DBS.result;
+  return { data: true, groups: st.loaded, process: st.loaded, qc: st.analysed, diff: st.analysed, enrich: !!S.comp, export: st.analysed,
+    dbfiles: true, dbsites: !!r, dbscatter: !!(r && r.summary.has_b), dbexport: !!r };
 }
-function updateNav() { const r = reach(); $$('#nav button').forEach(b => b.disabled = !r[b.dataset.page]); }
+function updateNav() {
+  const r = reach();
+  $$('#nav button').forEach(b => { b.hidden = b.dataset.mode !== S.mode; b.disabled = !r[b.dataset.page]; });
+  $$('#mode button').forEach(b => b.classList.toggle('on', b.dataset.mode === S.mode));
+}
+function setMode(m) {
+  S.mode = m; updateNav();
+  show(S.last[m]);
+}
+$('#mode').addEventListener('click', e => { const b = e.target.closest('button'); if (b && b.dataset.mode !== S.mode) setMode(b.dataset.mode); });
 function show(page) {
   if (!reach()[page]) return;
   $$('.page').forEach(p => p.classList.toggle('on', p.id === 'p-' + page));
   $$('#nav button').forEach(b => b.classList.toggle('on', b.dataset.page === page));
-  S.page = page; scrollTo(0, 0); requestAnimationFrame(() => redraw(page));
+  S.page = page; S.last[page.startsWith('db') ? 'db' : 'quant'] = page; scrollTo(0, 0); requestAnimationFrame(() => redraw(page));
 }
 $('#nav').addEventListener('click', e => { const b = e.target.closest('button'); if (b) show(b.dataset.page); });
 document.addEventListener('click', e => { const g = e.target.closest('[data-go]'); if (g) show(g.dataset.go); });
@@ -337,7 +349,7 @@ $('#en-run').onclick = e => busy(e.target, async () => {
 });
 
 /* ---------- redraw / lifecycle ---------- */
-function redraw(page) { if (page === 'qc') drawQc(); if (page === 'diff') drawDiff(); }
+function redraw(page) { if (page === 'qc') drawQc(); if (page === 'diff') drawDiff(); if (page === 'dbscatter' && window.drawDbScatter) drawDbScatter(); }
 let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => redraw(S.page), 120); });
 $('#anim').onchange = e => window.setBackgroundAnimation(e.target.checked);
 $('#quit').onclick = async () => { if (!confirm('Quit Proteomics Analyzer?')) return; try { await api('/api/quit', {}); } catch (e) {} document.body.innerHTML = '<p style="padding:40px;color:#8fb5b4;font:16px sans-serif">Proteomics Analyzer has quit. You can close this tab.</p>'; };
@@ -355,5 +367,6 @@ holdWindow();
       $('#d-a').innerHTML = opts; $('#d-b').innerHTML = opts; $('#d-a').selectedIndex = S.levels.length - 1;
     }
   }
+  try { DBS.st = await api('/api/db/state'); if (DBS.st.has_result) DBS.result = DBS.st.result; if (window.afterDbChange) afterDbChange(true); } catch (e) {}
   updateNav();
 })();

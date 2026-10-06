@@ -89,3 +89,22 @@ canvas{width:100%;display:block}
 #toast{position:fixed;right:20px;bottom:20px;max-width:420px;padding:12px 16px;border-radius:10px;background:#3b0d0d;border:1px solid var(--bad);color:#fecaca;opacity:0;transform:translateY(10px);transition:.25s;pointer-events:none;z-index:50}
 #toast.show{opacity:1;transform:none}#toast.ok{background:#05352f;border-color:var(--teal);color:#ccfbf1}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+.mode{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.mode button{background:none;border:0;color:var(--mute);padding:7px 14px;font:600 13px inherit;cursor:pointer;transition:.2s}
+.mode button.on{background:rgba(45,212,191,.22);color:var(--ink)}
+.mode button:hover:not(.on){color:var(--ink);background:rgba(45,212,191,.08)}
+nav button[hidden]{display:none}
+.slot{min-height:150px}.slot .drop{min-height:96px;padding:12px}.slot h3{margin:0 0 2px;font-size:17px}
+.slot .got{display:flex;gap:10px;align-items:center;color:var(--teal2);font:13px var(--mono);margin-top:8px}
+.slot .got button{margin-left:auto}
+.badge{display:inline-block;padding:2px 9px;border-radius:99px;font:11px var(--mono);letter-spacing:.06em;text-transform:uppercase;border:1px solid}
+.b-alternative{color:var(--amber);border-color:rgba(251,191,36,.5);background:rgba(251,191,36,.1)}
+.b-reference{color:var(--teal2);border-color:rgba(45,212,191,.5);background:rgba(45,212,191,.1)}
+.b-both{color:#c4b5fd;border-color:rgba(196,181,253,.5);background:rgba(196,181,253,.1)}
+.b-none{color:var(--mute);border-color:rgba(143,181,180,.3)}
+.mono{font-family:var(--mono);font-size:12.5px}.mono b{color:var(--amber)}
+tr.detail td{background:rgba(4,22,27,.7);padding:12px 16px}
+.pep{display:grid;grid-template-columns:minmax(150px,1.3fr) 90px 80px 1fr;gap:10px;align-items:center;padding:4px 0;border-bottom:1px solid rgba(94,234,212,.08);font:12.5px var(--mono)}
+.pep .bar2{height:8px;border-radius:4px;background:var(--teal);min-width:2px}.pep.alt .bar2{background:var(--amber)}
+.pep.amb{opacity:.55}.pep em{color:var(--mute);font-style:normal}

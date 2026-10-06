@@ -16,6 +16,14 @@ It starts after the search engine. Use MaxQuant, DIA-NN, Spectronaut or similar 
 | **Enrichment** | Over-representation (hypergeometric) of significant proteins in gene sets from a `.gmt` file you provide, against the proteins quantified in the comparison as background. |
 | **Export** | Results CSV, processed matrix CSV, and a JSON file with the groups, parameters and processing steps for your methods section. |
 
+## Database check mode
+
+A second mode (switch at the top of the page) for a different question: the same data were searched against a reference protein database and an alternative one, for example a genome translated with a codon read differently (CGG as Trp instead of Arg, an alternative start site, a point-mutation set). **Which version of each protein did the search actually see?**
+
+You load the peptide report (DIA-NN `report.pr_matrix.tsv`), the reference FASTA, and, optionally, the alternative FASTA. If one FASTA holds both standard and variant proteins, give the text that marks the variant IDs. The program pairs each variant with its reference protein, finds every position where they differ, and lists the identified peptides that span that position. Only such a peptide can tell the two versions apart. Peptides that also occur elsewhere in the database are shown as ambiguous and not counted. A report from a search against the standard database alone can be added for comparison.
+
+Each site gets a verdict: *alternative seen*, *reference seen*, *both seen*, or *no coverage*. Treat a verdict as a lead to check against the spectra, not as proof: it is only as reliable as the search's own false-discovery control, and a single peptide is thin evidence. *No coverage* is not evidence against either version.
+
 ## Run it
 
 Needs Python 3.9 or newer.
@@ -53,7 +61,7 @@ The tests check the file readers, normalisation and imputation, the statistics a
 
 ## Not yet included
 
-Paired and multi-factor designs, ANOVA across more than two groups, phospho-site level analysis, built-in annotation databases (gene sets are supplied by you), and PTM or peptide-level views.
+Paired and multi-factor designs, database check from long-format DIA-NN reports (only the precursor matrix is read), ANOVA across more than two groups, phospho-site level analysis, built-in annotation databases (gene sets are supplied by you), and PTM or peptide-level views.
 
 ## License
 

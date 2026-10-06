@@ -16,14 +16,21 @@
     <svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><use href="icon.svg#mark"/></svg>
     <div><div class="kicker">LC–MS/MS · protein level</div><h1>Proteomics Analyzer</h1></div>
   </div>
+  <div class="mode" id="mode" role="tablist" aria-label="Mode">
+    <button data-mode="quant" class="on">Quantification</button><button data-mode="db">Database check</button>
+  </div>
   <nav id="nav" aria-label="Workflow">
-    <button data-page="data" class="on"><i>01</i>Data</button>
-    <button data-page="groups"><i>02</i>Groups</button>
-    <button data-page="process"><i>03</i>Process</button>
-    <button data-page="qc"><i>04</i>Quality</button>
-    <button data-page="diff"><i>05</i>Differential</button>
-    <button data-page="enrich"><i>06</i>Enrichment</button>
-    <button data-page="export"><i>07</i>Export</button>
+    <button data-mode="quant" data-page="data" class="on"><i>01</i>Data</button>
+    <button data-mode="quant" data-page="groups"><i>02</i>Groups</button>
+    <button data-mode="quant" data-page="process"><i>03</i>Process</button>
+    <button data-mode="quant" data-page="qc"><i>04</i>Quality</button>
+    <button data-mode="quant" data-page="diff"><i>05</i>Differential</button>
+    <button data-mode="quant" data-page="enrich"><i>06</i>Enrichment</button>
+    <button data-mode="quant" data-page="export"><i>07</i>Export</button>
+    <button data-mode="db" data-page="dbfiles" hidden><i>01</i>Files</button>
+    <button data-mode="db" data-page="dbsites" hidden><i>02</i>Sites</button>
+    <button data-mode="db" data-page="dbscatter" hidden><i>03</i>Standard search</button>
+    <button data-mode="db" data-page="dbexport" hidden><i>04</i>Export</button>
   </nav>
   <div class="tools">
     <label class="sw" title="Animated background"><input type="checkbox" id="anim" checked><span></span>Animation</label>
@@ -172,9 +179,60 @@
       <a class="card dl" id="x-set" href="/api/download/settings" download><div class="kicker">JSON</div><h3>Analysis settings</h3><p>Groups, parameters and each processing step, for the methods section.</p></a>
     </div>
   </section>
+
+  <!-- DB 01 FILES -->
+  <section id="p-dbfiles" class="page">
+    <div class="lead"><div class="kicker">Database check · step 1</div><h2>Which version of the protein did the search see?</h2>
+      <p>Use this when the same data were searched against a reference protein database and an alternative one, for example a genome translated with a codon read differently. The program finds every position where the two versions of a protein differ and lists the identified peptides that span it. Only such a peptide can tell the versions apart, so it is the evidence.</p></div>
+    <div id="db-slots" class="grid2"></div>
+    <div class="card form">
+      <label>Alternative entries have this text in their ID
+        <input id="db-marker" value="CGG2W" placeholder="e.g. CGG2W"></label>
+      <p class="small">Needed only when one FASTA file holds both the standard proteins and the variants (the variants are the entries whose ID contains this text). Leave it as is if you load two files.</p>
+      <div class="actions"><button class="btn" id="db-run">Run comparison</button>
+        <button class="btn alt" id="db-example">Load simulated example</button></div>
+    </div>
+  </section>
+
+  <!-- DB 02 SITES -->
+  <section id="p-dbsites" class="page">
+    <div class="lead"><div class="kicker">Database check · step 2</div><h2>Evidence at each differing position</h2>
+      <p>A peptide counts only if it spans the position and does not also occur elsewhere in the database. Peptides that do are shown as ambiguous and are not counted.</p></div>
+    <div class="readouts" id="db-read"></div>
+    <div class="card">
+      <div class="bar"><div class="kicker">Sites</div>
+        <select id="db-filter"><option value="all">All sites</option><option value="alternative">Alternative version seen</option><option value="reference">Reference version seen</option><option value="both">Both seen</option><option value="none">No covering peptide</option></select>
+        <input id="db-search" type="search" placeholder="search protein…"></div>
+      <div class="tscroll"><table class="tbl" id="t-db"><thead><tr><th>Protein</th><th>Position</th><th>Change</th><th>Verdict</th><th>Reference peptides</th><th>Alternative peptides</th><th>Context</th></tr></thead><tbody></tbody></table></div>
+      <div class="small" id="db-foot">Click a row for the peptides, intensities and context.</div>
+    </div>
+    <div class="card"><div class="kicker">How to read this</div>
+      <p class="small">“Alternative version seen” means a peptide containing the alternative residue was identified and the reference version was not. It is only as reliable as the search's own false-discovery control, and a single peptide is thin evidence: check the spectra of the peptides that matter. Missing coverage is not evidence against a version, because many positions fall inside peptides that were never identified.</p></div>
+  </section>
+
+  <!-- DB 03 STANDARD SEARCH -->
+  <section id="p-dbscatter" class="page">
+    <div class="lead"><div class="kicker">Database check · step 3</div><h2>Compared with the standard-database search</h2>
+      <p>Peptides identified when the same data were searched against the standard database only, against the search that included the alternative proteins.</p></div>
+    <div class="readouts" id="db-sread"></div>
+    <div class="grid2">
+      <figure class="card"><figcaption>Shared peptides, log2 intensity <button class="ghost sm" data-save="c-dbsc">PNG</button></figcaption><canvas id="c-dbsc" height="380"></canvas></figure>
+      <div class="card"><div class="kicker">Sites where the standard search saw the reference peptide</div><div id="db-bsites" class="small"></div></div>
+    </div>
+  </section>
+
+  <!-- DB 04 EXPORT -->
+  <section id="p-dbexport" class="page">
+    <div class="lead"><div class="kicker">Database check · step 4</div><h2>Export</h2></div>
+    <div class="grid3">
+      <a class="card dl" href="/api/download/db_sites" download><div class="kicker">CSV</div><h3>Sites</h3><p>One row per differing position with its verdict and peptides.</p></a>
+      <a class="card dl" href="/api/download/db_peptides" download><div class="kicker">CSV</div><h3>Peptides</h3><p>Every peptide that spans a site, with start, end, charge, missed cleavages and intensity in each run.</p></a>
+    </div>
+  </section>
 </main>
 <footer>Proteomics Analyzer <span id="ver"></span> · runs entirely on this computer</footer>
 <script src="bg.js"></script>
 <script src="app.js"></script>
+<script src="dbcompare.js"></script>
 </body>
 </html>
