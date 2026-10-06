@@ -179,3 +179,16 @@ def test_pdf_without_standard_search_and_verdict_wording(sim):
     assert "No position could be judged" in report._verdict_sentence({"alternative": 0, "reference": 0, "both": 0, "none": 5}, "R", "W")
     assert "mixed" in report._verdict_sentence({"alternative": 2, "reference": 1, "both": 0, "none": 5}, "R", "W")
     assert report.build_pdf(run(sim, with_b=False), {"report": "r"}).startswith(b"%PDF")
+
+
+def test_pdf_standard_search_section_both_ways(sim):
+    pytest.importorskip("reportlab")
+    pymupdf = pytest.importorskip("pymupdf")
+    from proteomics_analyzer import report
+
+    def text(pdf):
+        return " ".join(" ".join(p.get_text() for p in pymupdf.open(stream=pdf, filetype="pdf")).split())
+    with_b = text(report.build_pdf(run(sim), {"report": "a", "fasta_ref": "b", "report_b": "c"}))
+    assert "Figure 4" in with_b and "found by both searches" in with_b and "Not included in this report" not in with_b
+    without = text(report.build_pdf(run(sim, with_b=False), {"report": "a", "fasta_ref": "b"}))
+    assert "Not included in this report" in without and "Figure 4" not in without

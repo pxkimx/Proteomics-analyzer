@@ -230,13 +230,63 @@ def build_pdf(res, files: dict, run_date: _dt.date | None = None) -> bytes:
                     "shows relative strength, not an amount.", small)]
     else:
         story += [P("No changed position was covered by an identified peptide.")]
+    story += [P("Comparison with a search against the standard database", h2)]
     if summ.get("has_b"):
         sc = res.scatter
-        story += [P("Comparison with a search against the standard database", h2),
-                  P(f"The same data were also searched against the standard database alone. {_n(sc['n_shared'])} peptides were found by both "
-                    f"searches, {_n(sc['n_only_a'])} only with the alternative proteins included, and {_n(sc['n_only_b'])} only in the "
-                    f"standard-only search. Intensities of the shared peptides agree closely "
-                    f"(correlation {sc['r']:.2f}), as they should for the same sample.")]
+        story += [P(f"The same data were also searched against the standard database alone (no alternative proteins). "
+                    f"<b>{_n(sc['n_shared'])}</b> peptides were found by both searches, <b>{_n(sc['n_only_a'])}</b> only in the main search "
+                    f"(which included the alternative proteins) and <b>{_n(sc['n_only_b'])}</b> only in the standard-only search. "
+                    f"For the peptides found by both, the signal strengths agree closely "
+                    f"(correlation {sc['r']:.2f}), as they should for the same sample. That suggests the two searches saw the same "
+                    f"material and that adding the alternative proteins left the rest of the results largely unchanged.")]
+        d = Drawing(250, 200)
+        lo = min(min(sc["a"]), min(sc["b"])) - 0.5 if sc["a"] else 0
+        hi = max(max(sc["a"]), max(sc["b"])) + 0.5 if sc["a"] else 1
+        x0, y0, w, h = 38, 30, 200, 150
+        d.add(Rect(x0, y0, w, h, strokeColor=colors.HexColor("#94a3b8"), fillColor=None, strokeWidth=0.6))
+        d.add(Line(x0, y0, x0 + w, y0 + h, strokeColor=colors.HexColor(AMBER), strokeDashArray=[3, 3], strokeWidth=0.8))
+        from reportlab.graphics.shapes import Circle
+        step = max(1, len(sc["a"]) // 1200)
+        for xa, yb in list(zip(sc["a"], sc["b"]))[::step]:
+            d.add(Circle(x0 + (xa - lo) / (hi - lo) * w, y0 + (yb - lo) / (hi - lo) * h, 1.3,
+                         fillColor=colors.HexColor(TEAL), strokeColor=None, fillOpacity=0.45))
+        for t in range(int(lo) + 1, int(hi), max(1, int((hi - lo) // 5))):
+            d.add(String(x0 + (t - lo) / (hi - lo) * w - 5, y0 - 10, str(t), fontSize=7, fontName="Helvetica"))
+            d.add(String(x0 - 16, y0 + (t - lo) / (hi - lo) * h - 2, str(t), fontSize=7, fontName="Helvetica"))
+        d.add(String(x0 + 20, 6, "main search (with alternative proteins)", fontSize=7.4, fontName="Helvetica",
+                     fillColor=colors.HexColor(GREY)))
+        d.add(String(0, y0 + h + 8, "standard-database search", fontSize=7.4, fontName="Helvetica", fillColor=colors.HexColor(GREY)))
+        story += [KeepTogether(captioned(d, "Figure 4. Each dot is a peptide found by both searches (log2 of its signal). "
+                                            "Dots near the dashed line mean the two searches agree."))]
+        hits = [s for s in sites if s["ref_peptides_b"]]
+        if hits:
+            story += [P(f"At <b>{len(hits)}</b> of the changed positions, the standard-only search identified a peptide carrying the "
+                        f"original letter ({_esc(ra)}):")]
+            rows = [[P("Protein", cellb), P("Position", cellb), P("Main-search verdict", cellb),
+                     P("Standard-search peptide", cellb), P("Also in main search?", cellb)]]
+            for s_ in hits:
+                rows.append([P(_esc(_short(s_["ref_protein"])), cell), P(str(s_["position"]), cell),
+                             P(_verdict_word(s_["status"]), cell),
+                             P("<br/>".join(_esc(p["sequence"]) for p in s_["ref_peptides_b"][:3]), cell),
+                             P("<br/>".join("yes" if p["seen_in_a"] else "no" for p in s_["ref_peptides_b"][:3]), cell)])
+            story += [table(rows, [1.2 * inch, 0.7 * inch, 1.6 * inch, 2.3 * inch, 1.1 * inch]),
+                      P("How to read this: the standard-only search has no alternative proteins, so it can only explain a spectrum with the "
+                        "original letter. If a peptide with the original letter shows up there but is absent from the main search, "
+                        "while the main search found the alternative version at the same position, the data prefer the alternative. "
+                        "It can also just mean the two searches differ in what they accept, so look at the spectra before relying on it.",
+                        small)]
+        else:
+            story += [P("The standard-only search did not identify a peptide spanning any changed position, so it adds no further "
+                        "information about them.")]
+    else:
+        story += [P("<b>Not included in this report.</b> The data were searched once, against a database that held both the standard "
+                    "and the alternative proteins, so there is nothing to compare it with yet."),
+                  P("The comparison is worth adding. Searching the same raw data again against the <i>standard</i> database alone "
+                    "(without the alternative proteins) shows what the data look like when only the original reading is allowed. "
+                    "Peptides that carry the original letter at a changed position can only be found in that search, and a position "
+                    "where they appear there but not in the main search may be one where the data favour the alternative. "
+                    "To add it: run the same files through DIA-NN with the standard FASTA only, then load the new "
+                    "<font face='Courier'>report.pr_matrix.tsv</font> in the program's fourth file box and download this report again.")]
 
     # ------------------------------------------------------------------ caveats
     story += [P("What this does and does not show", h2)] + bullets([
@@ -252,8 +302,10 @@ def build_pdf(res, files: dict, run_date: _dt.date | None = None) -> bytes:
         "contains the alternative letter.",
         "Repeat the experiment with replicates, so that the same peptides can be found more than once.",
         "To reach the uncovered positions, digest with a second enzyme (so that different peptides are produced) or run more material.",
-        "Compare against a search with the standard database only (if not done) to see whether the alternative peptides "
-        "disappear when the alternative proteins are removed."])
+        ("Compare the result with the standard-database search shown above, and look at the spectra at any position where the "
+         "two searches disagree." if summ.get("has_b") else
+         "Search the same data against the standard database alone and add that report, to see how the data behave when only "
+         "the original reading is allowed.")])
 
     # ------------------------------------------------------------------ appendix
     story += [PageBreak(), P("Appendix A. All changed positions", h1)]

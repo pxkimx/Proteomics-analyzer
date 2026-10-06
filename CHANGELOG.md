@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.1
+The PDF report always has a section on the standard-database search: a figure, a table of positions and a plain-English reading when a standard-search report is loaded, and a "not included" note with instructions when it is not.
+
 ## 0.3.0
 Database check mode: a **Coverage** page (proteins detected, sequence coverage, detection by protein size, peptide length and charge, per-protein table) and a **plain-English PDF report** (short version, what was measured, coverage, the question, results table, caveats, next steps, glossary, methods). New dependency: reportlab; the Mac app installs it itself on first start.
 
