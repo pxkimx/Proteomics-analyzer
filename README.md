@@ -30,7 +30,7 @@ python -m proteomics_analyzer          # opens http://localhost:8775
 
 Closing the browser tab stops the program. (A page reload does not.)
 
-**macOS app:** `macos/build_app.sh` builds a double-clickable `Proteomics Analyzer.app` with an icon. On first start it creates its own Python environment under `~/Library/Application Support/ProteomicsAnalyzer`. The app points at this folder, so rebuild it if you move the folder.
+**macOS app:** `macos/build_app.sh` builds a double-clickable `Proteomics Analyzer.app` with an icon. On first start it creates its own Python environment under `~/Library/Application Support/ProteomicsAnalyzer`. The app carries its own copy of the code, so rebuild it after you change the code.
 
 No data of your own yet? Use **Load simulated example** on the first page: a MaxQuant-style table with 3,000 invented proteins, two groups of four runs, left-censored missing values and flagged contaminants. It is simulated, not real biology, and the true changes are known, which the test suite uses.
 
